@@ -1,0 +1,10 @@
+{
+  "mcp.servers": {
+    "nimctx": {
+      "command": "/path/to/nimctx",
+      "args": [],
+      "transportType": "stdio",
+      "enabled": true
+    }
+  }
+}

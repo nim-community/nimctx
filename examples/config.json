@@ -1,0 +1,16 @@
+{
+  "nim": {
+    "nimPath": "/usr/local/bin/nim",
+    "nimblePath": "/usr/local/bin/nimble",
+    "stdlibPath": "/usr/local/lib/nim/lib"
+  },
+  "indexing": {
+    "enableStdlibIndex": true,
+    "enableDepIndex": true,
+    "cacheDir": "~/.cache/nimctx"
+  },
+  "limits": {
+    "maxSearchResults": 20,
+    "maxDocLength": 10000
+  }
+}

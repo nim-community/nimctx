@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "nimctx": {
+      "command": "/path/to/nimctx",
+      "args": [],
+      "env": {
+        "NIM_MCP_CACHE_DIR": "~/.cache/nimctx"
+      }
+    }
+  }
+}
