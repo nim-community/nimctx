@@ -1,6 +1,6 @@
 # Common indexing utilities for stdlib and package indexing
 
-import std/[os, strutils, times, osproc, json, options]
+import std/[os, strutils, times, osproc, json]
 
 type
   SymbolEntry* = object

@@ -87,8 +87,8 @@ proc initDatabase(db: DbConn): bool =
 proc checkFtsAvailable(db: DbConn): bool =
   ## Check if FTS tables exist
   try:
-    for row in db.rows("SELECT name FROM sqlite_master WHERE type='table' AND name='symbols_fts'"):
-      return row[0].fromDbValue(string) == "symbols_fts"
+    for row in db.iterate("SELECT name FROM sqlite_master WHERE type='table' AND name='symbols_fts'"):
+      return row.values[0].fromDbValue(string) == "symbols_fts"
     return false
   except:
     return false
@@ -148,6 +148,7 @@ type
     package*: string
 
 proc toSymbolResult(row: seq[DbValue]): SymbolResult =
+  ## Convert seq[DbValue] to SymbolResult
   result.id = row[0].fromDbValue(int64)
   result.name = row[1].fromDbValue(string)
   result.kind = if row[2].kind == tiny_sqlite.sqliteNull: "" else: row[2].fromDbValue(string)
@@ -211,8 +212,8 @@ proc search*(index: SqliteIndex, query: string;
     sqlQuery.add " LIMIT ?"
     params.add maxResults.toDbValue
     
-    for row in index.db.rows(sqlQuery, params):
-      result.add(toSymbolResult(row))
+    for row in index.db.iterate(sqlQuery, params):
+      result.add(toSymbolResult(row.values))
   else:
     # Fallback to LIKE queries
     var sqlQuery = """
@@ -239,31 +240,31 @@ proc search*(index: SqliteIndex, query: string;
     sqlQuery.add " LIMIT ?"
     params.add maxResults.toDbValue
     
-    for row in index.db.rows(sqlQuery, params):
-      result.add(toSymbolResult(row))
+    for row in index.db.iterate(sqlQuery, params):
+      result.add(toSymbolResult(row.values))
 
 proc getSymbol*(index: SqliteIndex, name: string): Option[SymbolResult] =
   ## Get a single symbol by name
-  for row in index.db.rows("""
+  for row in index.db.iterate("""
     SELECT id, name, kind, module_path, module_name, 
            code, description, line, col, package
     FROM symbols
     WHERE name = ?
     LIMIT 1
   """, name):
-    return some(toSymbolResult(row))
+    return some(toSymbolResult(row.values))
   
   return none(SymbolResult)
 
 proc getModuleSymbols*(index: SqliteIndex, moduleName: string): seq[SymbolResult] =
   ## Get all symbols from a module
-  for row in index.db.rows("""
+  for row in index.db.iterate("""
     SELECT id, name, kind, module_path, module_name, 
            code, description, line, col, package
     FROM symbols
     WHERE module_name = ?
   """, moduleName):
-    result.add(toSymbolResult(row))
+    result.add(toSymbolResult(row.values))
 
 proc getStats*(index: SqliteIndex): JsonNode =
   ## Get index statistics
@@ -271,14 +272,14 @@ proc getStats*(index: SqliteIndex): JsonNode =
   var moduleCount = 0
   var packageCount = 0
   
-  for row in index.db.rows("SELECT COUNT(*) FROM symbols"):
-    symbolCount = row[0].fromDbValue(int64).int
+  for row in index.db.iterate("SELECT COUNT(*) FROM symbols"):
+    symbolCount = row.values[0].fromDbValue(int64).int
   
-  for row in index.db.rows("SELECT COUNT(DISTINCT module_name) FROM symbols"):
-    moduleCount = row[0].fromDbValue(int64).int
+  for row in index.db.iterate("SELECT COUNT(DISTINCT module_name) FROM symbols"):
+    moduleCount = row.values[0].fromDbValue(int64).int
   
-  for row in index.db.rows("SELECT COUNT(DISTINCT package) FROM symbols"):
-    packageCount = row[0].fromDbValue(int64).int
+  for row in index.db.iterate("SELECT COUNT(DISTINCT package) FROM symbols"):
+    packageCount = row.values[0].fromDbValue(int64).int
   
   result = %*{
     "totalSymbols": symbolCount,
@@ -300,10 +301,10 @@ proc formatSymbol*(sym: SymbolResult): string =
 
 proc listModules*(index: SqliteIndex): seq[string] =
   ## List all module names in the index
-  for row in index.db.rows("SELECT DISTINCT module_name FROM symbols"):
-    result.add(row[0].fromDbValue(string))
+  for row in index.db.iterate("SELECT DISTINCT module_name FROM symbols"):
+    result.add(row.values[0].fromDbValue(string))
 
 proc listSymbols*(index: SqliteIndex): seq[string] =
   ## List all symbol names in the index
-  for row in index.db.rows("SELECT name FROM symbols"):
-    result.add(row[0].fromDbValue(string))
+  for row in index.db.iterate("SELECT name FROM symbols"):
+    result.add(row.values[0].fromDbValue(string))
