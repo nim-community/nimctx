@@ -235,21 +235,6 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
 
     result = McpToolResult(content: @[createTextContent(text)])
 
-  # Tool: List indexed packages
-  proc handleListIndexedPackages(args: JsonNode): McpToolResult {.gcsafe, closure.} =
-    var text = "## Indexed Packages\n\n"
-
-    if pkgRegistry.packages.len == 0:
-      text.add("No packages indexed yet. Use `index_package` to index a package.\n")
-    else:
-      for name, pkg in pkgRegistry.packages:
-        var totalSymbols = 0
-        for modInfo in pkg.modules.values:
-          totalSymbols += modInfo.entries.len
-        text.add("• **" & name & "** (" & $pkg.modules.len & " modules, " & $totalSymbols & " symbols)\n")
-
-    result = McpToolResult(content: @[createTextContent(text)])
-
   # Register all tools
   result.registerTool(
     McpTool(
@@ -294,15 +279,6 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
       inputSchema: parseJson("""{"type": "object", "properties": {"importPath": {"type": "string", "description": "Import path like 'strutils', 'json', or 'mypackage/utils'"}, "projectRoot": {"type": "string", "description": "Optional: Path to project root directory containing .nimble file. Uses current directory if not provided."}}, "required": ["importPath"]}""")
     ),
     handleResolveImport
-  )
-
-  result.registerTool(
-    McpTool(
-      name: "list_indexed_packages",
-      description: some("List all indexed packages"),
-      inputSchema: parseJson("""{"type": "object", "properties": {}}""")
-    ),
-    handleListIndexedPackages
   )
 
   # Tool: Check version compatibility
