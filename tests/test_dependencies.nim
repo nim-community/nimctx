@@ -105,3 +105,35 @@ license = "MIT"
     check pm2.nimblePath == "/custom/nimble"
     check pm2.projectRoot == "/new"
     check pm1.projectRoot == "/original"  # Original unchanged
+
+  test "findProjectRoot returns empty for non-existent directory":
+    let root = findProjectRoot("/nonexistent/path/12345")
+    check root == ""
+
+  test "findProjectRoot returns path when .nimble exists":
+    let tmpDir = getTempDir() / "nimctx_test_root"
+    createDir(tmpDir)
+    writeFile(tmpDir / "test.nimble", "# Test nimble file")
+    
+    let root = findProjectRoot(tmpDir)
+    check root == tmpDir
+    
+    # Cleanup
+    removeFile(tmpDir / "test.nimble")
+    removeDir(tmpDir)
+
+  test "findProjectRoot only checks given directory, not parents":
+    # Create nested structure
+    let parentDir = getTempDir() / "nimctx_test_parent"
+    let childDir = parentDir / "child"
+    createDir(childDir)
+    writeFile(parentDir / "parent.nimble", "# Parent nimble file")
+    
+    # Should not find parent's .nimble when checking child
+    let root = findProjectRoot(childDir)
+    check root == ""
+    
+    # Cleanup
+    removeFile(parentDir / "parent.nimble")
+    removeDir(childDir)
+    removeDir(parentDir)

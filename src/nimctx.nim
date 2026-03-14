@@ -70,27 +70,45 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
 
     result = McpToolResult(content: @[createTextContent(text)])
 
+  # Helper: Check and resolve project root
+  proc checkProjectRoot(projectRoot: string): (string, Option[McpToolResult]) =
+    ## Returns (resolvedRoot, errorResult). 
+    ## If projectRoot is provided, checks if .nimble exists in that directory.
+    ## If projectRoot is empty, checks the global projectManager.
+    ## Returns error if no valid project root is found.
+    if projectRoot.len > 0:
+      let root = findProjectRoot(projectRoot)
+      if root.len == 0:
+        return ("", some(McpToolResult(
+          content: @[createTextContent("Error: No .nimble file found in: " & projectRoot)]
+        )))
+      return (root, none(McpToolResult))
+    else:
+      # Use global project manager's root
+      if projectManager.projectRoot.len == 0:
+        return ("", some(McpToolResult(
+          content: @[createTextContent("Error: No .nimble file found in current directory. Please specify projectRoot or run from a Nim project directory.")]
+        )))
+      return (projectManager.projectRoot, none(McpToolResult))
+
   # Helper: Setup project manager with optional project root and auto-index dependencies
   proc setupProjectManager(projectRoot: string, autoIndex: bool = true): (ProjectManager, Option[McpToolResult]) =
     ## Returns (pm, errorResult). If errorResult.isSome, return it immediately.
     ## When autoIndex is true, project dependencies will be indexed for symbol search.
-    if projectRoot.len > 0:
-      let root = findProjectRoot(projectRoot)
-      if root.len == 0:
-        return (projectManager, some(McpToolResult(
-          content: @[createTextContent("Error: No .nimble file found in: " & projectRoot)]
-        )))
-      let pm = projectManager.withProjectRoot(root)
-      # Auto-index project dependencies only when requested
-      if autoIndex:
-        let deps = pm.getDependencies(true)
-        for dep in deps:
-          if not pkgRegistry.packages.hasKey(dep.name):
-            let pkgPath = pm.getDependencyPath(dep.name)
-            if pkgPath.len > 0:
-              discard pkgRegistry.indexPackage(dep.name, pkgPath)
-      return (pm, none(McpToolResult))
-    return (projectManager, none(McpToolResult))
+    let (root, err) = checkProjectRoot(projectRoot)
+    if err.isSome:
+      return (projectManager, err)
+    
+    let pm = projectManager.withProjectRoot(root)
+    # Auto-index project dependencies only when requested
+    if autoIndex:
+      let deps = pm.getDependencies(true)
+      for dep in deps:
+        if not pkgRegistry.packages.hasKey(dep.name):
+          let pkgPath = pm.getDependencyPath(dep.name)
+          if pkgPath.len > 0:
+            discard pkgRegistry.indexPackage(dep.name, pkgPath)
+    return (pm, none(McpToolResult))
 
   # Tool: Get procedure signature (from stdlib or packages)
   proc handleGetProcSignature(args: JsonNode): McpToolResult {.gcsafe, closure.} =
