@@ -1,13 +1,14 @@
 # Version compatibility checker for Nim projects
-# Tests code against multiple Nim versions using choosenim
+# Tests code against multiple Nim versions using direct binary paths
 
-import std/[os, osproc, strutils, sequtils, re, strformat, options, algorithm]
+import std/[os, osproc, strutils, re, strformat, options, algorithm]
 
 type
   NimVersion* = object
     version*: string      # e.g., "2.0.2", "#devel"
     isDevel*: bool
     isChannel*: bool      # stable, devel, etc.
+    binPath*: string      # Path to nim binary for this version
   
   CompileResult* = object
     version*: string
@@ -27,6 +28,31 @@ type
     maxCompatibleVersion*: Option[string]
     suggestedNimbleRequires*: string
 
+proc getChoosenimDir(): string =
+  ## Get the choosenim toolchains directory
+  let home = getHomeDir()
+  result = home / ".choosenim" / "toolchains"
+
+proc getNimBinaryPath(version: string): string =
+  ## Get the path to the nim binary for a specific version
+  ## Version can be like "2.0.2", "2.2.4", "#devel", etc.
+  let choosenimDir = getChoosenimDir()
+  
+  # Handle devel version
+  if version == "#devel" or version == "devel":
+    let develPath = choosenimDir / "nim-#devel" / "bin" / "nim"
+    if fileExists(develPath):
+      return develPath
+  else:
+    # Regular version like "2.0.2"
+    let versionPath = choosenimDir / "nim-" & version / "bin" / "nim"
+    if fileExists(versionPath):
+      return versionPath
+  
+  # Fallback: try to find via choosenim show path for current
+  # (this shouldn't happen if version is properly installed)
+  return ""
+
 proc findNimbleFiles*(dir: string): seq[string] =
   ## Find all .nimble files in a directory
   result = @[]
@@ -38,7 +64,7 @@ proc findNimbleFiles*(dir: string): seq[string] =
       result.add(path)
 
 proc getInstalledVersions*(): seq[NimVersion] =
-  ## Get all installed Nim versions from choosenim
+  ## Get all installed Nim versions from choosenim with their binary paths
   result = @[]
   
   let (output, exitCode) = execCmdEx("choosenim versions --installed")
@@ -69,20 +95,19 @@ proc getInstalledVersions*(): seq[NimVersion] =
     if versionStr in ["stable", "devel", "lts"]:
       continue
     
+    # Get the binary path for this version
+    let binPath = getNimBinaryPath(versionStr)
+    if binPath.len == 0 or not fileExists(binPath):
+      # Skip versions without accessible binaries
+      continue
+    
     var ver = NimVersion(
       version: versionStr,
       isDevel: versionStr == "#devel",
-      isChannel: versionStr in ["stable", "devel", "lts"]
+      isChannel: versionStr in ["stable", "devel", "lts"],
+      binPath: binPath
     )
     result.add(ver)
-
-proc switchVersion*(version: string): bool =
-  ## Switch to a specific Nim version using choosenim
-  # Handle versions with # (like #devel) by quoting properly
-  let quotedVersion = if version.startsWith("#"): "\"" & version & "\"" else: version
-  let cmd = "choosenim " & quotedVersion
-  let (output, exitCode) = execCmdEx(cmd, options = {poStdErrToStdOut})
-  return exitCode == 0
 
 proc parseCompileOutput*(output: string): tuple[errors, warnings, hints: seq[string]] =
   ## Parse nim check output into errors, warnings, and hints
@@ -105,20 +130,13 @@ proc parseCompileOutput*(output: string): tuple[errors, warnings, hints: seq[str
   
   return (errors, warnings, hints)
 
-proc testCompile*(filePath: string, nimVersion: string): CompileResult =
-  ## Test if a file compiles with a specific Nim version
-  result = CompileResult(version: nimVersion)
+proc testCompile*(filePath: string, nimVersion: NimVersion): CompileResult =
+  ## Test if a file compiles with a specific Nim version using direct binary path
+  result = CompileResult(version: nimVersion.version)
   
-  # First switch to the target version
-  if not switchVersion(nimVersion):
-    result.success = false
-    result.output = "Failed to switch to Nim version: " & nimVersion
-    result.errors.add(result.output)
-    return result
-  
-  # Run nim check
-  let cmd = "nim check " & quoteShell(filePath)
-  let (output, exitCode) = execCmdEx(cmd, options = {poStdErrToStdOut})
+  # Use the specific nim binary directly - no version switching needed!
+  let cmd = quoteShell(nimVersion.binPath) & " check " & quoteShell(filePath)
+  let (output, _) = execCmdEx(cmd, options = {poStdErrToStdOut})
   
   result.output = output
   let (errors, warnings, hints) = parseCompileOutput(output)
@@ -161,47 +179,53 @@ proc checkVersionCompat*(
   testAllInstalled: bool = true
 ): CompatReport =
   ## Check code compatibility with multiple Nim versions
+  ## Uses direct binary paths - no global version switching needed
   
   result = CompatReport(
     projectPath: filePath.parentDir(),
     testFile: filePath
   )
   
-  var versionsToTest: seq[string]
+  var versionsToTest: seq[NimVersion]
   
   if testAllInstalled:
-    # Get all installed versions
-    let installed = getInstalledVersions()
-    versionsToTest = installed.mapIt(it.version)
+    # Get all installed versions with their binary paths
+    versionsToTest = getInstalledVersions()
   else:
-    versionsToTest = versions
+    # Get specific versions requested
+    for verStr in versions:
+      let binPath = getNimBinaryPath(verStr)
+      if binPath.len > 0 and fileExists(binPath):
+        versionsToTest.add(NimVersion(
+          version: verStr,
+          isDevel: verStr == "#devel",
+          binPath: binPath
+        ))
+  
+  if versionsToTest.len == 0:
+    # No versions found to test
+    var noVerResult = CompileResult(
+      version: "unknown",
+      success: false,
+      output: "No Nim versions found to test. Ensure choosenim is installed and has versions available."
+    )
+    noVerResult.errors.add("No installed Nim versions found")
+    result.results.add(noVerResult)
+    result.incompatibleVersions.add("unknown")
+    return result
   
   # Sort versions for better reporting
-  versionsToTest.sort(proc(a, b: string): int = compareVersions(a, b))
+  versionsToTest.sort(proc(a, b: NimVersion): int = compareVersions(a.version, b.version))
   
-  # Remember current version to restore later
-  let (currentVersionOutput, _) = execCmdEx("nim --version")
-  var currentVersion = ""
-  for line in currentVersionOutput.splitLines:
-    if line.startsWith("Nim Compiler Version"):
-      let parts = line.split()
-      if parts.len >= 4:
-        currentVersion = parts[^1]  # Get version number
-      break
-  
-  # Test each version
-  for version in versionsToTest:
-    let compileResult = testCompile(filePath, version)
+  # Test each version - no need to remember/restore current version!
+  for nimVer in versionsToTest:
+    let compileResult = testCompile(filePath, nimVer)
     result.results.add(compileResult)
     
     if compileResult.success:
-      result.compatibleVersions.add(version)
+      result.compatibleVersions.add(nimVer.version)
     else:
-      result.incompatibleVersions.add(version)
-  
-  # Restore original version
-  if currentVersion.len > 0:
-    discard switchVersion(currentVersion)
+      result.incompatibleVersions.add(nimVer.version)
   
   # Determine min/max compatible versions
   if result.compatibleVersions.len > 0:
@@ -330,4 +354,4 @@ when isMainModule:
   # Test
   echo "Installed versions:"
   for ver in getInstalledVersions():
-    echo "  - ", ver.version
+    echo "  - ", ver.version, " at ", ver.binPath
