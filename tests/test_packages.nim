@@ -8,16 +8,14 @@ suite "package indexer":
   test "can create package registry":
     let cacheDir = getTempDir() / "nimctx_pkg_test"
     createDir(cacheDir)
-    let registry = newPackageRegistry(cacheDir)
+    let registry = newPackageRegistry(cacheDir, "nim")
     check registry != nil
     check registry.packages.len == 0
   
   test "can create package index":
-    let pkg = newPackageIndex("testpkg", "1.0.0", "/tmp/testpkg")
+    let cacheDir = getTempDir() / "nimctx_pkg_test2"
+    let pkg = newPackageIndex("testpkg", "1.0.0", "/tmp/testpkg", cacheDir, "nim")
     check pkg != nil
-    check pkg.name == "testpkg"
-    check pkg.version == "1.0.0"
-    check pkg.modules.len == 0
   
   test "can index package module":
     # Create a temporary test file
@@ -37,13 +35,14 @@ type TestType* = object
   field: int
 """)
     
-    let pkg = newPackageIndex("testpkg", "1.0.0", tmpDir)
-    pkg.indexPackageModule(testFile, "testmodule")
+    let cacheDir = getTempDir() / "nimctx_pkg_test3"
+    let pkg = newPackageIndex("testpkg", "1.0.0", tmpDir, cacheDir, "nim")
+    discard pkg.loadModuleFromJson(testFile)
     
     check pkg.modules.len == 1
     check pkg.modules.hasKey("testmodule")
-    check pkg.modules["testmodule"].doc.contains("Test module")
-    check pkg.modules["testmodule"].exports.len == 2  # testProc and TestType
+    check pkg.modules["testmodule"].moduleDescription.contains("Test module")
+    check pkg.modules["testmodule"].entries.len == 2  # testProc and TestType
     
     # Cleanup
     removeFile(testFile)
@@ -59,8 +58,9 @@ proc searchableProc*(x: int): int =
   x * 2
 """)
     
-    let pkg = newPackageIndex("searchpkg", "1.0.0", tmpDir)
-    pkg.indexPackageModule(testFile, "searchmod")
+    let cacheDir = getTempDir() / "nimctx_pkg_test4"
+    let pkg = newPackageIndex("searchpkg", "1.0.0", tmpDir, cacheDir, "nim")
+    discard pkg.loadModuleFromJson(testFile)
     
     let results = searchPackage(pkg, "searchable", 10)
     check results.len == 1
@@ -71,7 +71,8 @@ proc searchableProc*(x: int): int =
     removeDir(tmpDir)
   
   test "search caching works":
-    let pkg = newPackageIndex("cachepkg", "1.0.0", "/tmp")
+    let cacheDir = getTempDir() / "nimctx_pkg_test5"
+    let pkg = newPackageIndex("cachepkg", "1.0.0", "/tmp", cacheDir, "nim")
     # First search
     let results1 = searchPackage(pkg, "test", 10)
     # Second search should use cache

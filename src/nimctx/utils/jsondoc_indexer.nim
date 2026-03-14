@@ -1,6 +1,6 @@
 # JSONDoc-based indexer using `nim jsondoc` command
 
-import std/[os, strutils, json, options, times, tables, osproc]
+import std/[os, strutils, json, options, times, tables, osproc, sequtils]
 import cache
 
 type
