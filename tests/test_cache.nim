@@ -1,53 +1,108 @@
 # Tests for cache utilities
 
-import std/[unittest, times, options, tables]
+import std/[unittest, os, times, options, tables]
 import nimctx/utils/cache
 
 suite "memory cache":
-  test "can create cache":
-    let cache = newMemoryCache[string](maxSize = 100)
+  test "can create memory cache":
+    let cache = newMemoryCache[string](maxSize = 100, defaultTtl = initDuration(minutes = 5))
     check cache != nil
     check cache.maxSize == 100
-  
-  test "can set and get":
-    let cache = newMemoryCache[string]()
+    check len(cache.entries) == 0
+
+  test "can set and get value":
+    let cache = newMemoryCache[string](maxSize = 10)
     cache.set("key1", "value1")
-    let val = cache.get("key1")
-    check val.isSome
-    check val.get() == "value1"
-  
-  test "returns none for missing key":
-    let cache = newMemoryCache[string]()
-    let val = cache.get("missing")
-    check val.isNone
-  
-  test "can delete":
-    let cache = newMemoryCache[string]()
+    
+    let result = cache.get("key1")
+    check result.isSome
+    check result.get() == "value1"
+
+  test "get returns none for non-existent key":
+    let cache = newMemoryCache[int](maxSize = 10)
+    let result = cache.get("nonexistent")
+    check result.isNone
+
+  test "get returns none for expired entry":
+    let cache = newMemoryCache[string](maxSize = 10, defaultTtl = initDuration(milliseconds = 50))
     cache.set("key1", "value1")
+    
+    # Should exist immediately
+    check cache.get("key1").isSome
+    
+    # Wait for expiration
+    sleep(100)
+    
+    # Should be expired now
+    let result = cache.get("key1")
+    check result.isNone
+
+  test "can delete key":
+    let cache = newMemoryCache[string](maxSize = 10)
+    cache.set("key1", "value1")
+    check cache.get("key1").isSome
+    
     cache.del("key1")
-    let val = cache.get("key1")
-    check val.isNone
-  
-  test "can clear":
-    let cache = newMemoryCache[string]()
+    check cache.get("key1").isNone
+
+  test "clear removes all entries":
+    let cache = newMemoryCache[string](maxSize = 10)
     cache.set("key1", "value1")
     cache.set("key2", "value2")
+    check cache.entries.len == 2
+    
     cache.clear()
+    check len(cache.entries) == 0
     check cache.get("key1").isNone
     check cache.get("key2").isNone
-  
-  test "respects max size":
+
+  test "respects max size with LRU eviction":
     let cache = newMemoryCache[string](maxSize = 2)
     cache.set("key1", "value1")
     cache.set("key2", "value2")
-    cache.set("key3", "value3")  # Should trigger cleanup
-    # At least one of the old keys should be evicted
-    check (cache.get("key1").isNone or cache.get("key2").isNone)
+    check cache.entries.len == 2
+    
+    # Adding third item should evict oldest
+    cache.set("key3", "value3")
+    check cache.entries.len == 2
+    
+    # key1 should be evicted (LRU)
+    check cache.get("key1").isNone
+    check cache.get("key2").isSome
     check cache.get("key3").isSome
 
-  test "generates cache key":
-    let key1 = getCacheKey("part1", "part2", "part3")
-    check key1 == "part1:part2:part3"
+  test "access updates LRU order":
+    let cache = newMemoryCache[string](maxSize = 2)
+    cache.set("key1", "value1")
+    cache.set("key2", "value2")
     
-    let key2 = getCacheKey("single")
-    check key2 == "single"
+    # Access key1 to make it more recent
+    discard cache.get("key1")
+    
+    # Add new item - should evict key2 (now older)
+    cache.set("key3", "value3")
+    
+    check cache.get("key1").isSome  # Should still exist
+    check cache.get("key2").isNone  # Should be evicted
+    check cache.get("key3").isSome  # New item
+
+  test "custom TTL overrides default":
+    let cache = newMemoryCache[string](maxSize = 10, defaultTtl = initDuration(minutes = 10))
+    cache.set("key1", "value1", ttl = initDuration(milliseconds = 50))
+    
+    check cache.get("key1").isSome
+    sleep(100)
+    check cache.get("key1").isNone
+
+  test "zero TTL means no expiration":
+    let cache = newMemoryCache[string](maxSize = 10, defaultTtl = initDuration(0))
+    cache.set("key1", "value1")
+    
+    # Should still exist after short wait
+    sleep(50)
+    check cache.get("key1").isSome
+
+  test "getCacheKey generates correct keys":
+    check getCacheKey("a", "b", "c") == "a:b:c"
+    check getCacheKey("single") == "single"
+    check getCacheKey("") == ""

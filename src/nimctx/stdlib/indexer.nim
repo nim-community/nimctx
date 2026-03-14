@@ -1,9 +1,9 @@
 # Standard library indexing using nim jsondoc with parallel processing
 
-import std/[os, strutils, json, tables, options, times, osproc]
+import std/[os, json, tables, options]
 import std/cpuinfo
 import taskpools
-import ../utils/jsondoc_indexer
+import ../utils/[jsondoc_indexer, indexing]
 
 export jsondoc_indexer
 
@@ -60,31 +60,6 @@ proc findModulePath(index: StdlibIndex, moduleName: string): string =
       return path
   
   return ""
-
-proc indexSingleModule(nimPath, modulePath: string): bool {.gcsafe, raises: [].} =
-  ## Generate JSON doc for a single module (runs in worker thread)
-  try:
-    if not fileExists(modulePath):
-      return false
-    
-    let moduleDir = modulePath.parentDir()
-    let moduleName = extractFilename(modulePath).replace(".nim", "")
-    let jsonPath = moduleDir / "htmldocs" / moduleName & ".json"
-    
-    # Check if cached version is fresh
-    if fileExists(jsonPath):
-      let cacheTime = getFileInfo(jsonPath).lastWriteTime
-      let moduleTime = getFileInfo(modulePath).lastWriteTime
-      if cacheTime > moduleTime:
-        return true  # Cache is fresh
-    
-    # Generate jsondoc
-    let cmd = nimPath & " jsondoc " & quoteShell(modulePath)
-    let (_, exitCode) = execCmdEx(cmd)
-    
-    return exitCode == 0 and fileExists(jsonPath)
-  except:
-    return false
 
 proc scanAndIndexStdlib*(index: StdlibIndex): int =
   ## Scan and index all stdlib modules using parallel processing

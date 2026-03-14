@@ -165,13 +165,22 @@ proc getProjectInfo*(pm: var ProjectManager): Option[ProjectInfo] =
 
 proc getDependencies*(pm: ProjectManager, directOnly: bool = false): seq[Dependency] =
   ## Get project dependencies
+  ## When directOnly is true, returns only direct dependencies (those listed in .nimble file)
+  ## When directOnly is false, returns all dependencies including transitive ones
   let deps = parseNimbleDeps(pm)
   
   if directOnly:
-    # Return only direct dependencies (those without transitive parents)
+    # Return only direct dependencies (those that are not dependencies of other deps)
+    var transitiveDepNames: seq[string]
+    for dep in deps:
+      for transDep in dep.dependencies:
+        if transDep notin transitiveDepNames:
+          transitiveDepNames.add(transDep)
+    
     var directDeps: seq[Dependency]
     for dep in deps:
-      directDeps.add(dep)
+      if dep.name notin transitiveDepNames:
+        directDeps.add(dep)
     return directDeps
   
   return deps

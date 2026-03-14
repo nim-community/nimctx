@@ -30,13 +30,18 @@ proc isExpired[T](entry: CacheEntry[T]): bool =
 
 proc get*[T](cache: MemoryCache[T], key: string): Option[T] =
   ## Get value from cache
+  ## Updates access time for LRU tracking
   if not cache.entries.hasKey(key):
     return none(T)
   
-  let entry = cache.entries[key]
+  var entry = cache.entries[key]
   if isExpired(entry):
     cache.entries.del(key)
     return none(T)
+  
+  # Update access time for LRU tracking
+  entry.createdAt = getTime()
+  cache.entries[key] = entry
   
   return some(entry.data)
 

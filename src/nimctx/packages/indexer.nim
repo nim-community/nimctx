@@ -1,8 +1,10 @@
 # Dependency package indexing using nim jsondoc with parallel processing
 
-import std/[os, strutils, tables, options, times, cpuinfo, osproc]
-import ../utils/[cache, jsondoc_indexer]
+import std/[os, strutils, tables, options, times, cpuinfo]
+import ../utils/[cache, jsondoc_indexer, indexing]
 import taskpools
+
+export jsondoc_indexer
 
 export jsondoc_indexer
 
@@ -32,32 +34,6 @@ proc newPackageRegistry*(cacheDir: string, nimPath: string = ""): PackageRegistr
   # Create thread pool with number of CPUs
   let numThreads = max(2, cpuinfo.countProcessors())
   result.tp = TaskPool.new(numThreads)
-
-proc indexSingleModule(nimPath, modulePath: string): bool {.gcsafe, raises: [].} =
-  ## Generate JSON doc for a single module (runs in worker thread)
-  # This delegates to the jsondoc_indexer's generateJsonDoc logic
-  try:
-    if not fileExists(modulePath):
-      return false
-    
-    let moduleDir = modulePath.parentDir()
-    let moduleName = extractFilename(modulePath).replace(".nim", "")
-    let jsonPath = moduleDir / "htmldocs" / moduleName & ".json"
-    
-    # Check if cached version is fresh
-    if fileExists(jsonPath):
-      let cacheTime = getFileInfo(jsonPath).lastWriteTime
-      let moduleTime = getFileInfo(modulePath).lastWriteTime
-      if cacheTime > moduleTime:
-        return true  # Cache is fresh
-    
-    # Generate jsondoc
-    let cmd = nimPath & " jsondoc " & quoteShell(modulePath)
-    let (_, exitCode) = execCmdEx(cmd)
-    
-    return exitCode == 0 and fileExists(jsonPath)
-  except:
-    return false
 
 proc indexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): PackageIndex =
   ## Index a package and add to registry using parallel processing
