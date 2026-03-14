@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        nim-version: ['2.2.0', '2.2.2', 'stable']
+        nim-version: ['2.2.0', 'stable']
     
     steps:
     - uses: actions/checkout@v4
