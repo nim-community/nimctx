@@ -1,6 +1,6 @@
 # Standard library indexing using SQLite with FTS support
 
-import std/[os, json, options, cpuinfo]
+import std/[os, json, options, cpuinfo, locks]
 import taskpools
 import ../utils/[sqlite_indexer, indexing]
 export indexing.SymbolEntry
@@ -12,6 +12,8 @@ type
     sqlite*: SqliteIndex
     stdlibPath*: string
     tp*: TaskPool
+    indexLock*: Lock  # Protects concurrent indexing operations
+    isIndexed*: bool  # Track if indexing has been done
 
 proc newStdlibIndex*(stdlibPath, cacheDir: string; nimPath: string = ""): StdlibIndex =
   ## Create a new stdlib index with SQLite backend
@@ -35,8 +37,10 @@ proc newStdlibIndex*(stdlibPath, cacheDir: string; nimPath: string = ""): Stdlib
   result = StdlibIndex(
     sqlite: newSqliteIndex(dbPath, actualNimPath),
     stdlibPath: stdlibPath,
-    tp: TaskPool.new(numThreads)
+    tp: TaskPool.new(numThreads),
+    isIndexed: false
   )
+  initLock(result.indexLock)
 
 proc findModulePath(index: StdlibIndex, moduleName: string): string =
   ## Find the actual path for a module
@@ -58,6 +62,14 @@ proc findModulePath(index: StdlibIndex, moduleName: string): string =
 
 proc scanAndIndexStdlib*(index: StdlibIndex): int =
   ## Scan and index all stdlib modules using parallel processing
+  ## Thread-safe: Only one indexing operation at a time
+  acquire(index.indexLock)
+  defer: release(index.indexLock)
+  
+  # Check if already indexed
+  if index.isIndexed:
+    return 0
+  
   if not dirExists(index.stdlibPath):
     stderr.writeLine("Warning: Stdlib path not found: " & index.stdlibPath)
     return 0
@@ -113,6 +125,7 @@ proc scanAndIndexStdlib*(index: StdlibIndex): int =
       if entries.len > 0:
         indexedCount.inc()
   
+  index.isIndexed = true
   return indexedCount
 
 proc loadOrBuildIndex*(index: StdlibIndex): int =
@@ -196,3 +209,4 @@ proc close*(index: StdlibIndex) =
   ## Close the index and cleanup resources
   index.sqlite.close()
   index.tp.shutdown()
+  deinitLock(index.indexLock)

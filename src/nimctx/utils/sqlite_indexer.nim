@@ -16,6 +16,12 @@ proc initDatabase(db: DbConn): bool =
   ## Initialize SQLite database with symbols table and FTS virtual table
   ## Returns true if FTS is available and working
   
+  # Enable WAL mode for better concurrent read/write performance
+  db.exec("PRAGMA journal_mode=WAL")
+  
+  # Enable foreign keys
+  db.exec("PRAGMA foreign_keys=ON")
+  
   # Main symbols table
   db.exec("""
     CREATE TABLE IF NOT EXISTS symbols (

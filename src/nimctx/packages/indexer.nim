@@ -1,6 +1,6 @@
 # Dependency package indexing using SQLite with FTS support
 
-import std/[os, strutils, tables, options, times, cpuinfo]
+import std/[os, strutils, tables, options, times, cpuinfo, locks]
 import ../utils/[cache, sqlite_indexer, indexing]
 import taskpools
 
@@ -14,6 +14,7 @@ type
     globalSearchCache*: MemoryCache[seq[SymbolResult]]
     nimPath*: string
     tp*: TaskPool
+    indexLock*: Lock  # Protects concurrent indexing operations
 
 proc newPackageIndex*(name, version, path, cacheDir, nimPath: string): PackageIndex =
   ## Create a new package index with SQLite backend
@@ -30,12 +31,25 @@ proc newPackageRegistry*(cacheDir: string, nimPath: string = ""): PackageRegistr
   result.globalSearchCache = newMemoryCache[seq[SymbolResult]](maxSize = 500, defaultTtl = initDuration(minutes = 5))
   result.nimPath = if nimPath.len > 0: nimPath else: findExe("nim")
   
+  # Initialize lock for thread-safe indexing
+  initLock(result.indexLock)
+  
   # Create thread pool with number of CPUs
   let numThreads = max(2, cpuinfo.countProcessors())
   result.tp = TaskPool.new(numThreads)
 
 proc indexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): PackageIndex =
   ## Index a package and add to registry using parallel processing
+  ## Thread-safe: Only one package can be indexed at a time per registry
+  
+  # Acquire lock to prevent concurrent indexing of the same or different packages
+  acquire(registry.indexLock)
+  defer: release(registry.indexLock)
+  
+  # Check if already indexed while we have the lock
+  if registry.packages.hasKey(pkgName):
+    return registry.packages[pkgName]
+  
   # Extract version from path (e.g., pkgname-1.0.0-hash)
   var version = "unknown"
   let dirName = extractFilename(pkgPath)
@@ -69,7 +83,7 @@ proc indexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): Package
   for task in pendingTasks:
     generationResults.add(task.sync())
   
-  # Third pass: load into SQLite
+  # Third pass: load into SQLite (sequential - safe)
   for i, modulePath in modulePaths:
     if generationResults[i]:
       let jsonPath = getJsonDocPath(modulePath)
@@ -82,7 +96,12 @@ proc indexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): Package
 
 proc getOrIndexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): PackageIndex =
   ## Get cached package index or create new one
-  if registry.packages.hasKey(pkgName):
+  ## Thread-safe
+  acquire(registry.indexLock)
+  let alreadyIndexed = registry.packages.hasKey(pkgName)
+  release(registry.indexLock)
+  
+  if alreadyIndexed:
     return registry.packages[pkgName]
   
   return registry.indexPackage(pkgName, pkgPath)
@@ -95,12 +114,14 @@ proc searchAllPackages*(registry: PackageRegistry, query: string,
                         pkgFilter: Option[string] = none(string),
                         maxResults: int = 20): seq[SymbolResult] =
   ## Search across all indexed packages
+  ## Thread-safe for reading
+  
   # Generate cache key
   var cacheKey = query.toLowerAscii() & ":" & $maxResults
   if pkgFilter.isSome:
     cacheKey &= ":pkg:" & pkgFilter.get()
   
-  # Check global cache
+  # Check global cache (cache is thread-safe)
   let cached = registry.globalSearchCache.get(cacheKey)
   if cached.isSome:
     return cached.get()
@@ -108,6 +129,7 @@ proc searchAllPackages*(registry: PackageRegistry, query: string,
   var matches: seq[SymbolResult]
   
   # Search specific package or all packages
+  # Note: packages Table is read-only here, so no lock needed
   if pkgFilter.isSome:
     let pkgName = pkgFilter.get()
     if registry.packages.hasKey(pkgName):
@@ -143,3 +165,4 @@ proc close*(registry: PackageRegistry) =
   for pkg in registry.packages.values:
     pkg.close()
   registry.tp.shutdown()
+  deinitLock(registry.indexLock)
