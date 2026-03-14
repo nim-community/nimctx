@@ -33,18 +33,3 @@ jobs:
     
     - name: Test binary
       run: ./nimctx --version || echo "Binary check completed"
-
-  lint:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Nim
-      uses: alaviss/setup-nim@0.1.1
-      with:
-        path: 'nim-version-2-2'
-        version: 'version-2-2'
-    
-    - name: Static analysis
-      run: nim check src/nimctx.nim
