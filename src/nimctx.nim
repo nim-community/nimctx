@@ -2,7 +2,7 @@
 # Provides Nim stdlib and project dependencies context for AI assistants
 
 import nimctx/[config, stdlib/indexer, project/manager, packages/indexer, version_compat]
-import nimctx/utils/jsondoc_indexer
+import nimctx/utils/sqlite_indexer
 import nimcp
 import std/[os, strutils, json, options, tables, osproc]
 
@@ -20,7 +20,7 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
     let kindFilter = if args.hasKey("symbolType"): some("sk" & args["symbolType"].getStr().capitalizeAscii()) else: none(string)
     let packageFilter = if args.hasKey("packageFilter"): some(args["packageFilter"].getStr()) else: none(string)
 
-    var allResults: seq[JsonDocSymbol]
+    var allResults: seq[SymbolResult]
 
     # Search stdlib
     let stdlibResults = searchStdlib(stdlibIndex, query, moduleFilter, kindFilter, cfg.limits.maxSearchResults)
@@ -38,13 +38,13 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
       text = "Search results for '" & query & "':\n\n"
 
       # Group by source (stdlib vs package)
-      var stdlibSyms: seq[JsonDocSymbol]
-      var pkgSyms: seq[JsonDocSymbol]
+      var stdlibSyms: seq[SymbolResult]
+      var pkgSyms: seq[SymbolResult]
 
       for r in allResults:
         # Check if it's from a package (module path contains package name)
         let isFromPackage = pkgRegistry.packages.len > 0 and
-                            (packageFilter.isSome or r.modulePath.contains("pkgs2"))
+                            (packageFilter.isSome or r.package != "stdlib")
         if isFromPackage:
           pkgSyms.add(r)
         else:
@@ -188,27 +188,22 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
       let pkgNameStr = pkgName.get()
       if pkgRegistry.packages.hasKey(pkgNameStr):
         let pkg = pkgRegistry.packages[pkgNameStr]
-        # Find module by path
-        for modName, modInfo in pkg.modules:
-          if modName.contains(modulePath) or extractFilename(modInfo.origPath).replace(".nim", "") == modulePath:
-            text.add("**Package:** " & pkgNameStr & "\n\n")
-            text.add(modInfo.moduleDescription & "\n\n")
-            text.add("### Exports\n\n")
-            for entry in modInfo.entries:
-              text.add("• " & entry.name & " (" & entry.kind & ")\n")
-            found = true
-            break
+        let symbols = pkg.getModuleSymbols(modulePath)
+        if symbols.len > 0:
+          text.add("**Package:** " & pkgNameStr & "\n\n")
+          text.add("### Exports\n\n")
+          for entry in symbols:
+            text.add("• " & entry.name & " (" & entry.kind & ")\n")
+          found = true
 
     # Try stdlib
     if not found:
       let stdlibModule = getModuleDocs(stdlibIndex, modulePath)
-      if stdlibModule.isSome:
-        let m = stdlibModule.get()
+      if stdlibModule["exports"].getInt() > 0:
         text.add("**Source:** Standard Library\n\n")
-        text.add(m.moduleDescription & "\n\n")
         text.add("### Exports\n\n")
-        for entry in m.entries:
-          text.add("• " & entry.name & " (" & entry.kind & ")\n")
+        for entry in stdlibModule["symbols"]:
+          text.add("• " & entry["name"].getStr() & " (" & entry["kind"].getStr() & ")\n")
         found = true
 
     if not found:

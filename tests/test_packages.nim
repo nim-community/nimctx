@@ -1,8 +1,8 @@
 # Tests for package indexing
 
-import std/[unittest, os, options, times, tables, strutils]
+import std/[unittest, os, options, strutils, json, tables]
 import nimctx/packages/indexer
-import nimctx/project/manager
+import nimctx/utils/indexing
 
 suite "package indexer":
   test "can create package registry":
@@ -37,12 +37,43 @@ type TestType* = object
     
     let cacheDir = getTempDir() / "nimctx_pkg_test3"
     let pkg = newPackageIndex("testpkg", "1.0.0", tmpDir, cacheDir, "nim")
-    discard pkg.loadModuleFromJson(testFile)
     
-    check pkg.modules.len == 1
-    check pkg.modules.hasKey("testmodule")
-    check pkg.modules["testmodule"].moduleDescription.contains("Test module")
-    check pkg.modules["testmodule"].entries.len == 2  # testProc and TestType
+    # Generate JSON doc using nim
+    discard indexSingleModule("nim", testFile)
+    
+    # Parse JSON and add to SQLite
+    let jsonPath = testFile.parentDir() / "htmldocs" / "testmodule.json"
+    if fileExists(jsonPath):
+      let content = readFile(jsonPath)
+      let json = parseJson(content)
+      
+      if json.hasKey("entries") and json["entries"].kind == JArray:
+        for entry in json["entries"]:
+          var symName = ""
+          var symKind = ""
+          var symCode = ""
+          var symDesc = ""
+          var symLine = 0
+          var symCol = 0
+          
+          if entry.hasKey("name"):
+            symName = entry["name"].getStr()
+          if entry.hasKey("type"):
+            symKind = entry["type"].getStr()
+          if entry.hasKey("code"):
+            symCode = entry["code"].getStr()
+          if entry.hasKey("description"):
+            symDesc = entry["description"].getStr()
+          if entry.hasKey("line"):
+            symLine = entry["line"].getInt()
+          if entry.hasKey("col"):
+            symCol = entry["col"].getInt()
+          
+          pkg.addSymbol(symName, symKind, testFile, symCode, symDesc, symLine, symCol, "testpkg")
+    
+    # Verify symbols were added
+    let symbols = pkg.getModuleSymbols("testmodule")
+    check symbols.len == 2  # testProc and TestType
     
     # Cleanup
     removeFile(testFile)
@@ -60,7 +91,39 @@ proc searchableProc*(x: int): int =
     
     let cacheDir = getTempDir() / "nimctx_pkg_test4"
     let pkg = newPackageIndex("searchpkg", "1.0.0", tmpDir, cacheDir, "nim")
-    discard pkg.loadModuleFromJson(testFile)
+    
+    # Generate JSON doc
+    discard indexSingleModule("nim", testFile)
+    
+    # Parse and add to SQLite
+    let jsonPath = testFile.parentDir() / "htmldocs" / "searchmod.json"
+    if fileExists(jsonPath):
+      let content = readFile(jsonPath)
+      let json = parseJson(content)
+      
+      if json.hasKey("entries") and json["entries"].kind == JArray:
+        for entry in json["entries"]:
+          var symName = ""
+          var symKind = ""
+          var symCode = ""
+          var symDesc = ""
+          var symLine = 0
+          var symCol = 0
+          
+          if entry.hasKey("name"):
+            symName = entry["name"].getStr()
+          if entry.hasKey("type"):
+            symKind = entry["type"].getStr()
+          if entry.hasKey("code"):
+            symCode = entry["code"].getStr()
+          if entry.hasKey("description"):
+            symDesc = entry["description"].getStr()
+          if entry.hasKey("line"):
+            symLine = entry["line"].getInt()
+          if entry.hasKey("col"):
+            symCol = entry["col"].getInt()
+          
+          pkg.addSymbol(symName, symKind, testFile, symCode, symDesc, symLine, symCol, "searchpkg")
     
     let results = searchPackage(pkg, "searchable", 10)
     check results.len == 1

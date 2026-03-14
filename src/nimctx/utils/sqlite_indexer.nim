@@ -3,6 +3,7 @@
 
 import std/[os, strutils, json, options]
 import tiny_sqlite
+export tiny_sqlite.DbValue, tiny_sqlite.DbValueKind
 
 type
   SqliteIndex* = ref object
@@ -141,14 +142,14 @@ type
 proc toSymbolResult(row: seq[DbValue]): SymbolResult =
   result.id = row[0].fromDbValue(int64)
   result.name = row[1].fromDbValue(string)
-  result.kind = if row[2].kind == sqliteNull: "" else: row[2].fromDbValue(string)
-  result.modulePath = if row[3].kind == sqliteNull: "" else: row[3].fromDbValue(string)
-  result.moduleName = if row[4].kind == sqliteNull: "" else: row[4].fromDbValue(string)
-  result.code = if row[5].kind == sqliteNull: "" else: row[5].fromDbValue(string)
-  result.description = if row[6].kind == sqliteNull: "" else: row[6].fromDbValue(string)
+  result.kind = if row[2].kind == tiny_sqlite.sqliteNull: "" else: row[2].fromDbValue(string)
+  result.modulePath = if row[3].kind == tiny_sqlite.sqliteNull: "" else: row[3].fromDbValue(string)
+  result.moduleName = if row[4].kind == tiny_sqlite.sqliteNull: "" else: row[4].fromDbValue(string)
+  result.code = if row[5].kind == tiny_sqlite.sqliteNull: "" else: row[5].fromDbValue(string)
+  result.description = if row[6].kind == tiny_sqlite.sqliteNull: "" else: row[6].fromDbValue(string)
   result.line = row[7].fromDbValue(int64).int
   result.col = row[8].fromDbValue(int64).int
-  result.package = if row[9].kind == sqliteNull: "stdlib" else: row[9].fromDbValue(string)
+  result.package = if row[9].kind == tiny_sqlite.sqliteNull: "stdlib" else: row[9].fromDbValue(string)
 
 proc search*(index: SqliteIndex, query: string;
              moduleFilter: Option[string] = none(string),
@@ -271,3 +272,13 @@ proc formatSymbol*(sym: SymbolResult): string =
   
   if sym.description.len > 0:
     result.add("**Description:**\n" & sym.description & "\n")
+
+proc listModules*(index: SqliteIndex): seq[string] =
+  ## List all module names in the index
+  for row in index.db.rows("SELECT DISTINCT module_name FROM symbols"):
+    result.add(row[0].fromDbValue(string))
+
+proc listSymbols*(index: SqliteIndex): seq[string] =
+  ## List all symbol names in the index
+  for row in index.db.rows("SELECT name FROM symbols"):
+    result.add(row[0].fromDbValue(string))

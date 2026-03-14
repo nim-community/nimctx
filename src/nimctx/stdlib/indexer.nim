@@ -1,25 +1,19 @@
-# Standard library indexing using nim jsondoc with parallel processing
+# Standard library indexing using SQLite with FTS support
 
-import std/[os, json, tables, options]
-import std/cpuinfo
+import std/[os, json, options, cpuinfo]
 import taskpools
-import ../utils/[jsondoc_indexer, indexing]
+import ../utils/[sqlite_indexer, indexing]
 
-export jsondoc_indexer
+export sqlite_indexer
 
 type
   StdlibIndex* = ref object
-    jsonIndex*: JsonDocIndex
+    sqlite*: SqliteIndex
     stdlibPath*: string
     tp*: TaskPool
 
-  ModuleTaskResult = object
-    moduleName: string
-    modulePath: string
-    success: bool
-
 proc newStdlibIndex*(stdlibPath, cacheDir: string; nimPath: string = ""): StdlibIndex =
-  ## Create a new stdlib index with parallel processing support
+  ## Create a new stdlib index with SQLite backend
   var actualNimPath = nimPath
   
   if actualNimPath.len == 0:
@@ -31,14 +25,14 @@ proc newStdlibIndex*(stdlibPath, cacheDir: string; nimPath: string = ""): Stdlib
   if actualNimPath.len == 0 or not fileExists(actualNimPath):
     raise newException(OSError, "nim binary not found for stdlib: " & stdlibPath)
   
-  let jsonCacheDir = cacheDir / "jsondoc"
-  createDir(jsonCacheDir)
+  let dbPath = cacheDir / "stdlib.db"
+  createDir(cacheDir)
   
   # Create thread pool with number of CPUs
   let numThreads = max(2, cpuinfo.countProcessors())
   
   result = StdlibIndex(
-    jsonIndex: newJsonDocIndex(jsonCacheDir, actualNimPath),
+    sqlite: newSqliteIndex(dbPath, actualNimPath),
     stdlibPath: stdlibPath,
     tp: TaskPool.new(numThreads)
   )
@@ -67,8 +61,10 @@ proc scanAndIndexStdlib*(index: StdlibIndex): int =
     stderr.writeLine("Warning: Stdlib path not found: " & index.stdlibPath)
     return 0
   
+  # Clear existing stdlib data
+  index.sqlite.clear()
+  
   # Core modules to index (most commonly used)
-  # Note: os.nim, macros.nim, typeinfo.nim are temporarily excluded due to nim jsondoc bugs
   let coreModules = [
     "system", "algorithm", "tables", "sets", "sequtils",
     "strutils", "strformat", "strscans", "parseutils", "unicode",
@@ -92,7 +88,7 @@ proc scanAndIndexStdlib*(index: StdlibIndex): int =
   
   # Second pass: parallel JSON generation using taskpools
   var pendingTasks: seq[FlowVar[bool]] = @[]
-  let nimPath = index.jsonIndex.nimPath  # Capture locally for spawn
+  let nimPath = index.sqlite.nimPath
   
   for info in moduleInfos:
     let modulePath = info.path
@@ -104,20 +100,58 @@ proc scanAndIndexStdlib*(index: StdlibIndex): int =
   for task in pendingTasks:
     generationResults.add(task.sync())
   
-  # Third pass: sequential loading (thread-safe, modifies shared state)
+  # Third pass: load into SQLite
   var indexedCount = 0
   for i, info in moduleInfos:
     if generationResults[i]:
-      if index.jsonIndex.loadModuleFromJson(info.path):
-        indexedCount.inc()
+      # Parse JSON and add to SQLite
+      let jsonPath = info.path.parentDir() / "htmldocs" / info.name & ".json"
+      if fileExists(jsonPath):
+        try:
+          let content = readFile(jsonPath)
+          let json = parseJson(content)
+          
+          if json.hasKey("entries") and json["entries"].kind == JArray:
+            for entry in json["entries"]:
+              var symName = ""
+              var symKind = ""
+              var symCode = ""
+              var symDesc = ""
+              var symLine = 0
+              var symCol = 0
+              
+              if entry.hasKey("name"):
+                symName = entry["name"].getStr()
+              if entry.hasKey("type"):
+                symKind = entry["type"].getStr()
+              if entry.hasKey("code"):
+                symCode = entry["code"].getStr()
+              if entry.hasKey("description"):
+                symDesc = entry["description"].getStr()
+              if entry.hasKey("line"):
+                symLine = entry["line"].getInt()
+              if entry.hasKey("col"):
+                symCol = entry["col"].getInt()
+              
+              index.sqlite.addSymbol(symName, symKind, info.path, symCode, symDesc, symLine, symCol, "stdlib")
+          
+          indexedCount.inc()
+        except:
+          stderr.writeLine("Error parsing JSON for " & info.name & ": " & getCurrentExceptionMsg())
   
   return indexedCount
 
 proc loadOrBuildIndex*(index: StdlibIndex): int =
   ## Load existing index or build new one
+  # Check if already indexed
+  let stats = index.sqlite.getStats()
+  if stats["totalSymbols"].getInt() > 0:
+    stderr.writeLine("Using existing SQLite index with " & $stats["totalSymbols"].getInt() & " symbols")
+    return stats["totalModules"].getInt()
+  
   let indexedCount = scanAndIndexStdlib(index)
   if indexedCount > 0:
-    stderr.writeLine("Indexed " & $indexedCount & " stdlib modules")
+    stderr.writeLine("Indexed " & $indexedCount & " stdlib modules into SQLite")
   return indexedCount
 
 proc indexStdlibModule*(index: StdlibIndex, moduleName: string): bool =
@@ -125,28 +159,82 @@ proc indexStdlibModule*(index: StdlibIndex, moduleName: string): bool =
   let modulePath = index.findModulePath(moduleName)
   if modulePath.len == 0:
     return false
-  return index.jsonIndex.loadModuleFromJson(modulePath)
+  
+  # Generate JSON doc
+  if not indexSingleModule(index.sqlite.nimPath, modulePath):
+    return false
+  
+  # Parse and add to SQLite
+  let jsonPath = modulePath.parentDir() / "htmldocs" / moduleName & ".json"
+  if not fileExists(jsonPath):
+    return false
+  
+  try:
+    let content = readFile(jsonPath)
+    let json = parseJson(content)
+    
+    if json.hasKey("entries") and json["entries"].kind == JArray:
+      for entry in json["entries"]:
+        var symName = ""
+        var symKind = ""
+        var symCode = ""
+        var symDesc = ""
+        var symLine = 0
+        var symCol = 0
+        
+        if entry.hasKey("name"):
+          symName = entry["name"].getStr()
+        if entry.hasKey("type"):
+          symKind = entry["type"].getStr()
+        if entry.hasKey("code"):
+          symCode = entry["code"].getStr()
+        if entry.hasKey("description"):
+          symDesc = entry["description"].getStr()
+        if entry.hasKey("line"):
+          symLine = entry["line"].getInt()
+        if entry.hasKey("col"):
+          symCol = entry["col"].getInt()
+        
+        index.sqlite.addSymbol(symName, symKind, modulePath, symCode, symDesc, symLine, symCol, "stdlib")
+    
+    return true
+  except:
+    stderr.writeLine("Error indexing module " & moduleName & ": " & getCurrentExceptionMsg())
+    return false
 
-# Backwards compatibility wrappers
+# Search wrappers
 proc searchStdlib*(index: StdlibIndex, query: string, 
                    moduleFilter, typeFilter: Option[string],
-                   maxResults: int): seq[JsonDocSymbol] =
-  ## Search stdlib for symbols
-  return searchJsonDoc(index.jsonIndex, query, moduleFilter, typeFilter, maxResults)
+                   maxResults: int): seq[SymbolResult] =
+  ## Search stdlib for symbols using SQLite FTS
+  return index.sqlite.search(query, moduleFilter, typeFilter, none(string), maxResults)
 
-proc getProcInfo*(index: StdlibIndex, moduleName, procName: string): Option[JsonDocSymbol] =
+proc getProcInfo*(index: StdlibIndex, moduleName, procName: string): Option[SymbolResult] =
   ## Get procedure info by module and name
-  if not index.jsonIndex.modules.hasKey(moduleName):
-    discard index.indexStdlibModule(moduleName)
+  # First ensure module is indexed
+  if moduleName.len > 0:
+    let modSymbols = index.sqlite.getModuleSymbols(moduleName)
+    if modSymbols.len == 0:
+      discard index.indexStdlibModule(moduleName)
   
-  return getSymbol(index.jsonIndex, procName)
+  return index.sqlite.getSymbol(procName)
 
-proc getModuleDocs*(index: StdlibIndex, moduleName: string): Option[JsonDocModule] =
-  ## Get module documentation
-  if not index.jsonIndex.modules.hasKey(moduleName):
-    discard index.indexStdlibModule(moduleName)
+proc getModuleDocs*(index: StdlibIndex, moduleName: string): JsonNode =
+  ## Get module documentation as JSON
+  let symbols = index.sqlite.getModuleSymbols(moduleName)
   
-  return getModule(index.jsonIndex, moduleName)
+  result = %*{
+    "name": moduleName,
+    "exports": symbols.len,
+    "symbols": []
+  }
+  
+  for sym in symbols:
+    result["symbols"].add(%*{
+      "name": sym.name,
+      "kind": sym.kind,
+      "description": sym.description
+    })
 
 proc isStdlibModule*(index: StdlibIndex, moduleName: string): bool =
   ## Check if a module is in stdlib
@@ -157,12 +245,5 @@ proc getStdlibModulePath*(index: StdlibIndex, moduleName: string): string =
   return index.findModulePath(moduleName)
 
 proc getStdlibIndexJson*(index: StdlibIndex): JsonNode =
-  ## Get stdlib index as JSON
-  result = %*{ "modules": {} }
-  
-  for name, module in index.jsonIndex.modules:
-    result["modules"][name] = %*{
-      "path": module.origPath,
-      "doc": module.moduleDescription[0..<min(module.moduleDescription.len, 200)],
-      "exports": module.entries.len
-    }
+  ## Get stdlib index statistics as JSON
+  return index.sqlite.getStats()
