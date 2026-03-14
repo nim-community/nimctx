@@ -100,6 +100,8 @@ proc newSqliteIndex*(dbPath, nimPath: string): SqliteIndex =
   
   if not dbExists:
     result.hasFts = initDatabase(result.db)
+    if not result.hasFts:
+      stderr.writeLine("Warning: SQLite FTS not available. Search will use slower LIKE queries.")
   else:
     result.hasFts = checkFtsAvailable(result.db)
 
@@ -151,6 +153,19 @@ proc toSymbolResult(row: seq[DbValue]): SymbolResult =
   result.col = row[8].fromDbValue(int64).int
   result.package = if row[9].kind == tiny_sqlite.sqliteNull: "stdlib" else: row[9].fromDbValue(string)
 
+proc sanitizeSearchQuery*(query: string): string =
+  ## Sanitize a search query to prevent SQL injection
+  ## Removes special SQLite FTS characters that could cause issues
+  result = query
+  # Remove SQLite FTS special characters (but keep basic wildcards for LIKE)
+  result = result.replace("\"", "")  # Remove double quotes
+  result = result.replace("'", "")   # Remove single quotes
+  result = result.replace(";", "")   # Remove semicolons
+  result = result.replace("--", "")  # Remove SQL comments
+  result = result.replace("/*", "")  # Remove block comment start
+  result = result.replace("*/", "")  # Remove block comment end
+  result = result.strip()
+
 proc search*(index: SqliteIndex, query: string;
              moduleFilter: Option[string] = none(string),
              kindFilter: Option[string] = none(string),
@@ -158,7 +173,11 @@ proc search*(index: SqliteIndex, query: string;
              maxResults: int = 20): seq[SymbolResult] =
   ## Search for symbols using FTS if available, fallback to LIKE
   
-  let queryLower = query.toLowerAscii()
+  let safeQuery = sanitizeSearchQuery(query)
+  if safeQuery.len == 0:
+    return @[]
+  
+  let queryLower = safeQuery.toLowerAscii()
   
   if index.hasFts and query.len > 0:
     # Use FTS for fast full-text search

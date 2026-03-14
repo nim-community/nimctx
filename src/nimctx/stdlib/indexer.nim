@@ -3,6 +3,7 @@
 import std/[os, json, options, cpuinfo]
 import taskpools
 import ../utils/[sqlite_indexer, indexing]
+export indexing.SymbolEntry
 
 export sqlite_indexer
 
@@ -105,39 +106,12 @@ proc scanAndIndexStdlib*(index: StdlibIndex): int =
   for i, info in moduleInfos:
     if generationResults[i]:
       # Parse JSON and add to SQLite
-      let jsonPath = info.path.parentDir() / "htmldocs" / info.name & ".json"
-      if fileExists(jsonPath):
-        try:
-          let content = readFile(jsonPath)
-          let json = parseJson(content)
-          
-          if json.hasKey("entries") and json["entries"].kind == JArray:
-            for entry in json["entries"]:
-              var symName = ""
-              var symKind = ""
-              var symCode = ""
-              var symDesc = ""
-              var symLine = 0
-              var symCol = 0
-              
-              if entry.hasKey("name"):
-                symName = entry["name"].getStr()
-              if entry.hasKey("type"):
-                symKind = entry["type"].getStr()
-              if entry.hasKey("code"):
-                symCode = entry["code"].getStr()
-              if entry.hasKey("description"):
-                symDesc = entry["description"].getStr()
-              if entry.hasKey("line"):
-                symLine = entry["line"].getInt()
-              if entry.hasKey("col"):
-                symCol = entry["col"].getInt()
-              
-              index.sqlite.addSymbol(symName, symKind, info.path, symCode, symDesc, symLine, symCol, "stdlib")
-          
-          indexedCount.inc()
-        except:
-          stderr.writeLine("Error parsing JSON for " & info.name & ": " & getCurrentExceptionMsg())
+      let jsonPath = getJsonDocPath(info.path)
+      let entries = parseJsonDoc(jsonPath)
+      for sym in entries:
+        index.sqlite.addSymbol(sym.name, sym.kind, info.path, sym.code, sym.description, sym.line, sym.col, "stdlib")
+      if entries.len > 0:
+        indexedCount.inc()
   
   return indexedCount
 
@@ -165,42 +139,12 @@ proc indexStdlibModule*(index: StdlibIndex, moduleName: string): bool =
     return false
   
   # Parse and add to SQLite
-  let jsonPath = modulePath.parentDir() / "htmldocs" / moduleName & ".json"
-  if not fileExists(jsonPath):
-    return false
+  let jsonPath = getJsonDocPath(modulePath)
+  let entries = parseJsonDoc(jsonPath)
+  for sym in entries:
+    index.sqlite.addSymbol(sym.name, sym.kind, modulePath, sym.code, sym.description, sym.line, sym.col, "stdlib")
   
-  try:
-    let content = readFile(jsonPath)
-    let json = parseJson(content)
-    
-    if json.hasKey("entries") and json["entries"].kind == JArray:
-      for entry in json["entries"]:
-        var symName = ""
-        var symKind = ""
-        var symCode = ""
-        var symDesc = ""
-        var symLine = 0
-        var symCol = 0
-        
-        if entry.hasKey("name"):
-          symName = entry["name"].getStr()
-        if entry.hasKey("type"):
-          symKind = entry["type"].getStr()
-        if entry.hasKey("code"):
-          symCode = entry["code"].getStr()
-        if entry.hasKey("description"):
-          symDesc = entry["description"].getStr()
-        if entry.hasKey("line"):
-          symLine = entry["line"].getInt()
-        if entry.hasKey("col"):
-          symCol = entry["col"].getInt()
-        
-        index.sqlite.addSymbol(symName, symKind, modulePath, symCode, symDesc, symLine, symCol, "stdlib")
-    
-    return true
-  except:
-    stderr.writeLine("Error indexing module " & moduleName & ": " & getCurrentExceptionMsg())
-    return false
+  return entries.len > 0
 
 # Search wrappers
 proc searchStdlib*(index: StdlibIndex, query: string, 
@@ -247,3 +191,8 @@ proc getStdlibModulePath*(index: StdlibIndex, moduleName: string): string =
 proc getStdlibIndexJson*(index: StdlibIndex): JsonNode =
   ## Get stdlib index statistics as JSON
   return index.sqlite.getStats()
+
+proc close*(index: StdlibIndex) =
+  ## Close the index and cleanup resources
+  index.sqlite.close()
+  index.tp.shutdown()

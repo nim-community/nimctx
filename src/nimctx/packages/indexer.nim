@@ -1,6 +1,6 @@
 # Dependency package indexing using SQLite with FTS support
 
-import std/[os, strutils, tables, options, times, cpuinfo, json]
+import std/[os, strutils, tables, options, times, cpuinfo]
 import ../utils/[cache, sqlite_indexer, indexing]
 import taskpools
 
@@ -72,37 +72,10 @@ proc indexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): Package
   # Third pass: load into SQLite
   for i, modulePath in modulePaths:
     if generationResults[i]:
-      let jsonPath = modulePath.parentDir() / "htmldocs" / extractFilename(modulePath).replace(".nim", "") & ".json"
-      if fileExists(jsonPath):
-        try:
-          let content = readFile(jsonPath)
-          let json = parseJson(content)
-          
-          if json.hasKey("entries") and json["entries"].kind == JArray:
-            for entry in json["entries"]:
-              var symName = ""
-              var symKind = ""
-              var symCode = ""
-              var symDesc = ""
-              var symLine = 0
-              var symCol = 0
-              
-              if entry.hasKey("name"):
-                symName = entry["name"].getStr()
-              if entry.hasKey("type"):
-                symKind = entry["type"].getStr()
-              if entry.hasKey("code"):
-                symCode = entry["code"].getStr()
-              if entry.hasKey("description"):
-                symDesc = entry["description"].getStr()
-              if entry.hasKey("line"):
-                symLine = entry["line"].getInt()
-              if entry.hasKey("col"):
-                symCol = entry["col"].getInt()
-              
-              pkg.addSymbol(symName, symKind, modulePath, symCode, symDesc, symLine, symCol, pkgName)
-        except:
-          stderr.writeLine("Error parsing JSON for " & modulePath & ": " & getCurrentExceptionMsg())
+      let jsonPath = getJsonDocPath(modulePath)
+      let entries = parseJsonDoc(jsonPath)
+      for sym in entries:
+        pkg.addSymbol(sym.name, sym.kind, modulePath, sym.code, sym.description, sym.line, sym.col, pkgName)
   
   registry.packages[pkgName] = pkg
   return pkg
@@ -115,8 +88,8 @@ proc getOrIndexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): Pa
   return registry.indexPackage(pkgName, pkgPath)
 
 proc searchPackage*(pkg: PackageIndex, query: string, maxResults: int): seq[SymbolResult] =
-  ## Search within a single package
-  return pkg.search(query, none(string), none(string), some(pkg.dbPath.parentDir().extractFilename), maxResults)
+  ## Search within a single package (no cache - use searchAllPackages for cached multi-package search)
+  return pkg.search(query, none(string), none(string), none(string), maxResults)
 
 proc searchAllPackages*(registry: PackageRegistry, query: string, 
                         pkgFilter: Option[string] = none(string),
@@ -164,3 +137,9 @@ proc listPackageModules*(pkg: PackageIndex): seq[string] =
 proc listPackageSymbols*(pkg: PackageIndex): seq[string] =
   ## List all symbol names in package
   return pkg.listSymbols()
+
+proc close*(registry: PackageRegistry) =
+  ## Close the registry and cleanup resources
+  for pkg in registry.packages.values:
+    pkg.close()
+  registry.tp.shutdown()
