@@ -210,7 +210,6 @@ nimctx/
 - **Multi-Level Caching**: File index cache + in-memory search cache for optimal performance
 - **Incremental Indexing**: Index dependency packages on demand with automatic discovery
 - **Version Compatibility Checking**: Test code against multiple Nim versions via choosenim integration
-- **Concurrency Safe**: Uses ref types and closures for concurrent handling
 - **Smart Recognition**: Automatically distinguishes between stdlib and package modules
 
 ## License
