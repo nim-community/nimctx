@@ -1,5 +1,9 @@
 # nimctx - Nim Context MCP Server
 
+[![CI](https://github.com/nim-community/nimctx/actions/workflows/ci.yml/badge.svg)](https://github.com/nim-community/nimctx/actions/workflows/ci.yml)
+[![Nim Version](https://img.shields.io/badge/nim-%3E%3D2.2.0-orange.svg)](https://nim-lang.org)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 [English](README.md) | 中文
 
 Nim Context MCP Server 为 AI 编程助手提供深度的 Nim 项目和标准库上下文，包括依赖包的模块索引。

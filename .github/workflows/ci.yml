@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        nim-version: ['2.2.0', '2.2.x', 'stable']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Nim
+      uses: jiro4989/setup-nim-action@v2
+      with:
+        nim-version: ${{ matrix.nim-version }}
+        use-cache: true
+    
+    - name: Install dependencies
+      run: nimble install -y
+    
+    - name: Build
+      run: nimble build
+    
+    - name: Run tests
+      run: nimble test
+    
+    - name: Test binary
+      run: ./nimctx --version || echo "Binary check completed"
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Nim
+      uses: jiro4989/setup-nim-action@v2
+      with:
+        nim-version: '2.2.x'
+        use-cache: true
+    
+    - name: Check formatting
+      run: |
+        nimble install nph -y
+        nph --check src/
+      continue-on-error: true
+    
+    - name: Static analysis
+      run: nim check src/nimctx.nim

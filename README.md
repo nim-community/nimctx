@@ -1,5 +1,9 @@
 # nimctx - Nim Context MCP Server
 
+[![CI](https://github.com/nim-community/nimctx/actions/workflows/ci.yml/badge.svg)](https://github.com/nim-community/nimctx/actions/workflows/ci.yml)
+[![Nim Version](https://img.shields.io/badge/nim-%3E%3D2.2.0-orange.svg)](https://nim-lang.org)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 English | [中文](README.zh.md)
 
 Nim Context MCP Server provides deep context for Nim projects and standard library for AI programming assistants, including module indexing for dependency packages.
