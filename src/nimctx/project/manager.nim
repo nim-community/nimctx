@@ -1,6 +1,6 @@
 # Project dependency management
 
-import std/[os, strutils, json, options, tables, hashes, times, osproc]
+import std/[os, strutils, json, options, tables, hashes, times, osproc, streams]
 
 type
   Dependency* = object
@@ -36,19 +36,42 @@ proc newProjectManager*(nimblePath, projectRoot: string): ProjectManager =
   )
 
 proc execNimble*(pm: ProjectManager, args: string, workingDir: string = ""): (string, int) =
-  ## Execute nimble command
-  let cmd = pm.nimblePath & " " & args
+  ## Execute nimble command with proper working directory
+  ## Thread-safe: does not modify global current directory
   let dir = if workingDir.len > 0: workingDir else: pm.projectRoot
   
-  var oldDir = ""
-  if dir != getCurrentDir():
-    oldDir = getCurrentDir()
-    setCurrentDir(dir)
+  # Parse args for startProcess (handles quoted args correctly)
+  var parsedArgs: seq[string] = @[]
+  for arg in args.splitWhitespace():
+    parsedArgs.add(arg)
   
-  result = execCmdEx(cmd)
+  # Use startProcess with workingDir instead of setCurrentDir (thread-safe)
+  var process: Process
+  if dir.len > 0 and dirExists(dir):
+    process = startProcess(
+      pm.nimblePath,
+      workingDir = dir,
+      args = parsedArgs,
+      options = {poStdErrToStdOut, poUsePath}
+    )
+  else:
+    process = startProcess(
+      pm.nimblePath,
+      args = parsedArgs,
+      options = {poStdErrToStdOut, poUsePath}
+    )
   
-  if oldDir.len > 0:
-    setCurrentDir(oldDir)
+  # Read output using streams module
+  var output = ""
+  let strm = process.outputStream
+  while not strm.atEnd:
+    output.add(strm.readLine)
+    output.add("\n")
+  
+  let exitCode = process.waitForExit()
+  process.close()
+  
+  result = (output, exitCode)
 
 proc withProjectRoot*(pm: ProjectManager, projectRoot: string): ProjectManager =
   ## Create a new ProjectManager with different project root

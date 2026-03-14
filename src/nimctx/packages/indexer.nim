@@ -6,8 +6,6 @@ import taskpools
 
 export jsondoc_indexer
 
-export jsondoc_indexer
-
 type
   PackageIndex* = JsonDocIndex
   PackageRegistry* = ref object
