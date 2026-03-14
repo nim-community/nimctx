@@ -8,23 +8,17 @@ English | [中文](README.zh.md)
 
 Nim Context MCP Server provides deep context for Nim projects and standard library for AI programming assistants, including module indexing for dependency packages.
 
-This project nimctx solves the problem of AI programming assistants lacking deep cont
-  ext about Nim projects.
+This project nimctx solves the problem of AI programming assistants lacking deep context about Nim projects.
 
-  The Problem
+## The Problem
 
-  When AI assistants (like Claude) help with Nim programming, they face several challen
-  ges:
+When AI assistants (like Claude) help with Nim programming, they face several challenges:
 
-  1. No easy access to stdlib docs - Can't look up standard library functions, their si
-     tures, or documentation
-  2. Dependency blind spot - Don't know what packages a project depends on or what's av
-     able in them
-  3. Import confusion - Can't tell if import json refers to stdlib or a third-party pac
-     e
-  4. Version compatibility - Hard to check if code works across different Nim versions
-  5. Manual context - Users have to manually copy-paste docs or package info into conve
-     tions
+1. **No easy access to stdlib docs** - Can't look up standard library functions, their signatures, or documentation
+2. **Dependency blind spot** - Don't know what packages a project depends on or what's available in them
+3. **Import confusion** - Can't tell if `import json` refers to stdlib or a third-party package
+4. **Version compatibility** - Hard to check if code works across different Nim versions
+5. **Manual context** - Users have to manually copy-paste docs or package info into conversations
 
 
 ## Features
