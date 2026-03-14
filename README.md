@@ -178,16 +178,6 @@ nimctx/
 └── notes/                      # Design documents
 ```
 
-## Running Tests
-
-```bash
-# Run all tests
-nim c -r tests/test_cache.nim
-nim c -r tests/test_packages.nim
-nim c -r tests/test_project_manager.nim
-nim c -r tests/test_integration.nim
-```
-
 ## Technical Features
 
 - **Multi-Level Caching**: File index cache + in-memory search cache
