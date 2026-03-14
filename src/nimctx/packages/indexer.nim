@@ -1,7 +1,8 @@
-# Dependency package indexing using nim jsondoc
+# Dependency package indexing using nim jsondoc with parallel processing
 
-import std/[os, strutils, tables, options, times]
+import std/[os, strutils, tables, options, times, cpuinfo, osproc]
 import ../utils/[cache, jsondoc_indexer]
+import taskpools
 
 export jsondoc_indexer
 
@@ -12,6 +13,7 @@ type
     cacheDir*: string
     globalSearchCache*: MemoryCache[seq[JsonDocSymbol]]
     nimPath*: string
+    tp*: TaskPool
 
 proc newPackageIndex*(name, version, path, cacheDir, nimPath: string): PackageIndex =
   ## Create a new package index
@@ -20,15 +22,45 @@ proc newPackageIndex*(name, version, path, cacheDir, nimPath: string): PackageIn
   result = newJsonDocIndex(pkgCacheDir, nimPath)
 
 proc newPackageRegistry*(cacheDir: string, nimPath: string = ""): PackageRegistry =
-  ## Create a new package registry
+  ## Create a new package registry with parallel processing support
   new(result)
   result.cacheDir = cacheDir
   result.packages = initTable[string, PackageIndex]()
   result.globalSearchCache = newMemoryCache[seq[JsonDocSymbol]](maxSize = 500, defaultTtl = initDuration(minutes = 5))
   result.nimPath = if nimPath.len > 0: nimPath else: findExe("nim")
+  
+  # Create thread pool with number of CPUs
+  let numThreads = max(2, cpuinfo.countProcessors())
+  result.tp = TaskPool.new(numThreads)
+
+proc indexSingleModule(nimPath, modulePath: string): bool {.gcsafe, raises: [].} =
+  ## Generate JSON doc for a single module (runs in worker thread)
+  # This delegates to the jsondoc_indexer's generateJsonDoc logic
+  try:
+    if not fileExists(modulePath):
+      return false
+    
+    let moduleDir = modulePath.parentDir()
+    let moduleName = extractFilename(modulePath).replace(".nim", "")
+    let jsonPath = moduleDir / "htmldocs" / moduleName & ".json"
+    
+    # Check if cached version is fresh
+    if fileExists(jsonPath):
+      let cacheTime = getFileInfo(jsonPath).lastWriteTime
+      let moduleTime = getFileInfo(modulePath).lastWriteTime
+      if cacheTime > moduleTime:
+        return true  # Cache is fresh
+    
+    # Generate jsondoc
+    let cmd = nimPath & " jsondoc " & quoteShell(modulePath)
+    let (_, exitCode) = execCmdEx(cmd)
+    
+    return exitCode == 0 and fileExists(jsonPath)
+  except:
+    return false
 
 proc indexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): PackageIndex =
-  ## Index a package and add to registry
+  ## Index a package and add to registry using parallel processing
   # Extract version from path (e.g., pkgname-1.0.0-hash)
   var version = "unknown"
   let dirName = extractFilename(pkgPath)
@@ -38,11 +70,31 @@ proc indexPackage*(registry: PackageRegistry, pkgName, pkgPath: string): Package
   
   let pkg = newPackageIndex(pkgName, version, pkgPath, registry.cacheDir, registry.nimPath)
   
-  # Scan all .nim files in package
+  # First pass: collect all .nim files to process
+  var modulePaths: seq[string] = @[]
   if dirExists(pkgPath):
     for file in walkDirRec(pkgPath):
       if file.endsWith(".nim") and not file.endsWith("_test.nim") and not file.contains("/tests/"):
-        discard pkg.loadModuleFromJson(file)
+        modulePaths.add(file)
+  
+  # Second pass: parallel JSON generation using taskpools
+  var pendingTasks: seq[FlowVar[bool]] = @[]
+  let nimPath = registry.nimPath  # Capture locally for spawn
+  
+  for modulePath in modulePaths:
+    let mpath = modulePath  # Local copy for spawn capture
+    let task = registry.tp.spawn indexSingleModule(nimPath, mpath)
+    pendingTasks.add(task)
+  
+  # Wait for all generation tasks to complete
+  var generationResults: seq[bool] = @[]
+  for task in pendingTasks:
+    generationResults.add(task.sync())
+  
+  # Third pass: sequential loading (thread-safe, modifies shared state)
+  for i, modulePath in modulePaths:
+    if generationResults[i]:
+      discard pkg.loadModuleFromJson(modulePath)
   
   registry.packages[pkgName] = pkg
   return pkg
