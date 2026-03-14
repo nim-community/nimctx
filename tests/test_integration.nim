@@ -2,7 +2,6 @@
 
 import std/[unittest, os, strutils, json, options, tables]
 import nimctx/[config, stdlib/indexer, project/manager, packages/indexer]
-import nimctx/utils/jsondoc_indexer
 
 const projectRoot = currentSourcePath().parentDir().parentDir()
 
