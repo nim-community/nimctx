@@ -9,20 +9,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: nimlang/nim:2.2.0
     strategy:
       matrix:
-        nim-version: ['2.2.0', '2.2.2']
+        nim-version: ['2.2.0', '2.2.2', 'stable']
     
     steps:
     - uses: actions/checkout@v4
     
     - name: Setup Nim ${{ matrix.nim-version }}
-      run: |
-        if [ "${{ matrix.nim-version }}" != "2.2.0" ]; then
-          choosenim ${{ matrix.nim-version }}
-        fi
-        nim --version
+      uses: alaviss/setup-nim@0.1.1
+      with:
+        path: 'nim-${{ matrix.nim-version }}'
+        version: ${{ matrix.nim-version }}
     
     - name: Install dependencies
       run: nimble install -y
@@ -36,31 +34,17 @@ jobs:
     - name: Test binary
       run: ./nimctx --version || echo "Binary check completed"
 
-  test-stable:
-    runs-on: ubuntu-latest
-    container: nimlang/nim:latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Nim version
-      run: nim --version
-    
-    - name: Install dependencies
-      run: nimble install -y
-    
-    - name: Build
-      run: nimble build
-    
-    - name: Run tests
-      run: nimble test
-
   lint:
     runs-on: ubuntu-latest
-    container: nimlang/nim:2.2.0
     
     steps:
     - uses: actions/checkout@v4
+    
+    - name: Setup Nim
+      uses: alaviss/setup-nim@0.1.1
+      with:
+        path: 'nim-stable'
+        version: 'stable'
     
     - name: Static analysis
       run: nim check src/nimctx.nim
