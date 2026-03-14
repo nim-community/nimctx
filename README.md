@@ -187,6 +187,7 @@ nimctx/
 │   ├── nimctx.nim              # Main entry + MCP server
 │   └── nimctx/
 │       ├── config.nim          # Configuration management
+│       ├── version_compat.nim  # Nim version compatibility checking
 │       ├── stdlib/
 │       │   └── indexer.nim     # Standard library indexing
 │       ├── packages/
@@ -195,7 +196,9 @@ nimctx/
 │       │   └── manager.nim     # Nimble dependency management
 │       └── utils/
 │           ├── cache.nim       # In-memory cache system
-│           └── logging.nim     # Logging utilities
+│           ├── logging.nim     # Logging utilities
+│           ├── indexing.nim    # Indexing utilities and common types
+│           └── sqlite_indexer.nim  # SQLite-based symbol indexing backend
 ├── tests/                      # Tests
 ├── examples/                   # Configuration examples
 └── notes/                      # Design documents
@@ -203,8 +206,10 @@ nimctx/
 
 ## Technical Features
 
-- **Multi-Level Caching**: File index cache + in-memory search cache
-- **Incremental Indexing**: Index dependency packages on demand
+- **SQLite-Based Indexing**: Persistent and efficient symbol storage using SQLite backend for fast lookups
+- **Multi-Level Caching**: File index cache + in-memory search cache for optimal performance
+- **Incremental Indexing**: Index dependency packages on demand with automatic discovery
+- **Version Compatibility Checking**: Test code against multiple Nim versions via choosenim integration
 - **Concurrency Safe**: Uses ref types and closures for concurrent handling
 - **Smart Recognition**: Automatically distinguishes between stdlib and package modules
 

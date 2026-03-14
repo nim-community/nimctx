@@ -180,15 +180,18 @@ nimctx/
 │   ├── nimctx.nim              # 主入口 + MCP服务器
 │   └── nimctx/
 │       ├── config.nim          # 配置管理
+│       ├── version_compat.nim  # Nim 版本兼容性检查
 │       ├── stdlib/
 │       │   └── indexer.nim     # 标准库索引
 │       ├── packages/
-│       │   └── indexer.nim     # 依赖包索引 (新增)
+│       │   └── indexer.nim     # 依赖包索引
 │       ├── project/
 │       │   └── manager.nim     # nimble依赖管理
 │       └── utils/
 │           ├── cache.nim       # 内存缓存系统
-│           └── logging.nim     # 日志工具
+│           ├── logging.nim     # 日志工具
+│           ├── indexing.nim    # 索引工具和通用类型
+│           └── sqlite_indexer.nim  # SQLite 符号索引后端
 ├── tests/                      # 测试
 ├── examples/                   # 配置示例
 └── notes/                      # 设计文档
@@ -206,8 +209,10 @@ nim c -r tests/test_integration.nim
 
 ## 技术特性
 
-- **多级缓存**: 文件索引缓存 + 内存搜索缓存
-- **增量索引**: 按需索引依赖包
+- **SQLite 索引后端**: 使用 SQLite 后端进行持久化、高效的符号存储，实现快速查找
+- **多级缓存**: 文件索引缓存 + 内存搜索缓存，实现最佳性能
+- **增量索引**: 按需索引依赖包，自动发现新包
+- **版本兼容性检查**: 通过 choosenim 集成，测试代码在多个 Nim 版本下的兼容性
 - **并发安全**: 使用 ref 类型和闭包处理并发
 - **智能识别**: 自动区分 stdlib 和包模块
 
