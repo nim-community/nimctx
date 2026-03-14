@@ -209,36 +209,19 @@ proc searchJsonDoc*(index: JsonDocIndex, query: string,
     return cached.get()
   
   let queryLower = query.toLowerAscii()
-  var matches: seq[JsonDocSymbol]
   
-  # Search in symbol table
-  for name, symbols in index.symbolTable:
-    if queryLower in name.toLowerAscii():
-      for sym in symbols:
-        # Apply filters
-        if moduleFilter.isSome:
-          let moduleName = extractFilename(sym.modulePath).replace(".nim", "")
-          if moduleName != moduleFilter.get():
-            continue
-        if kindFilter.isSome and sym.kind != kindFilter.get():
-          continue
-        matches.add(sym)
-    else:
-      # Search in description
-      for sym in symbols:
-        if queryLower in sym.description.toLowerAscii():
-          if moduleFilter.isSome:
-            let moduleName = extractFilename(sym.modulePath).replace(".nim", "")
-            if moduleName != moduleFilter.get():
-              continue
-          if kindFilter.isSome and sym.kind != kindFilter.get():
-            continue
-          matches.add(sym)
-    
-    if matches.len >= maxResults:
-      break
+  # Collect all symbols from symbolTable
+  var allSymbols: seq[JsonDocSymbol]
+  for symbols in index.symbolTable.values:
+    allSymbols.add(symbols)
   
-  result = matches[0..<min(matches.len, maxResults)]
+  # Filter by query (name or description), module, and kind
+  result = allSymbols.filterIt(
+    (queryLower in it.name.toLowerAscii() or queryLower in it.description.toLowerAscii()) and
+    (moduleFilter.isNone or extractFilename(it.modulePath).replace(".nim", "") == moduleFilter.get()) and
+    (kindFilter.isNone or it.kind == kindFilter.get())
+  )[0 ..< min(maxResults, allSymbols.len)]
+  
   index.searchCache.set(cacheKey, result)
 
 proc getSymbol*(index: JsonDocIndex, name: string): Option[JsonDocSymbol] =
