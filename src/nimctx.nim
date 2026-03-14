@@ -71,8 +71,9 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
     result = McpToolResult(content: @[createTextContent(text)])
 
   # Helper: Setup project manager with optional project root and auto-index dependencies
-  proc setupProjectManager(projectRoot: string): (ProjectManager, Option[McpToolResult]) =
+  proc setupProjectManager(projectRoot: string, autoIndex: bool = true): (ProjectManager, Option[McpToolResult]) =
     ## Returns (pm, errorResult). If errorResult.isSome, return it immediately.
+    ## When autoIndex is true, project dependencies will be indexed for symbol search.
     if projectRoot.len > 0:
       let root = findProjectRoot(projectRoot)
       if root.len == 0:
@@ -80,13 +81,14 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
           content: @[createTextContent("Error: No .nimble file found in: " & projectRoot)]
         )))
       let pm = projectManager.withProjectRoot(root)
-      # Auto-index project dependencies (internal behavior)
-      let deps = pm.getDependencies(true)
-      for dep in deps:
-        if not pkgRegistry.packages.hasKey(dep.name):
-          let pkgPath = pm.getDependencyPath(dep.name)
-          if pkgPath.len > 0:
-            discard pkgRegistry.indexPackage(dep.name, pkgPath)
+      # Auto-index project dependencies only when requested
+      if autoIndex:
+        let deps = pm.getDependencies(true)
+        for dep in deps:
+          if not pkgRegistry.packages.hasKey(dep.name):
+            let pkgPath = pm.getDependencyPath(dep.name)
+            if pkgPath.len > 0:
+              discard pkgRegistry.indexPackage(dep.name, pkgPath)
       return (pm, none(McpToolResult))
     return (projectManager, none(McpToolResult))
 
@@ -130,7 +132,7 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
     let directOnly = if args.hasKey("directOnly"): args["directOnly"].getBool() else: false
     let projectRoot = if args.hasKey("projectRoot"): args["projectRoot"].getStr() else: ""
     
-    let (pm, err) = setupProjectManager(projectRoot)
+    let (pm, err) = setupProjectManager(projectRoot, autoIndex = false)
     if err.isSome:
       return err.get()
     
@@ -201,7 +203,7 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
     let importPath = args["importPath"].getStr()
     let projectRoot = if args.hasKey("projectRoot"): args["projectRoot"].getStr() else: ""
     
-    let (pm, err) = setupProjectManager(projectRoot)
+    let (pm, err) = setupProjectManager(projectRoot, autoIndex = false)
     if err.isSome:
       return err.get()
 
@@ -230,48 +232,6 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
           text.add("**Source:** Unknown (not in stdlib or installed packages)\n")
       else:
         text.add("**Source:** Unknown\n")
-
-    result = McpToolResult(content: @[createTextContent(text)])
-
-  # Tool: Index package (manual indexing)
-  proc handleIndexPackage(args: JsonNode): McpToolResult {.gcsafe, closure.} =
-    let pkgName = args["packageName"].getStr()
-    let projectRoot = if args.hasKey("projectRoot"): args["projectRoot"].getStr() else: ""
-    
-    let (pm, err) = setupProjectManager(projectRoot)
-    if err.isSome:
-      return err.get()
-
-    var text = "## Indexing Package: " & pkgName & "\n\n"
-
-    # Get package path
-    let pkgPath = pm.getDependencyPath(pkgName)
-    if pkgPath.len == 0:
-      text.add("Error: Package '" & pkgName & "' not found. Make sure it's installed (nimble install " & pkgName & ")\n")
-    else:
-      # Index the package
-      let pkg = pkgRegistry.indexPackage(pkgName, pkgPath)
-      text.add("✓ Indexed " & pkgName & "\n\n")
-      text.add("**Path:** " & pkgPath & "\n")
-
-      var totalModules = 0
-      var totalSymbols = 0
-      for modName, modInfo in pkg.modules:
-        totalModules.inc()
-        totalSymbols += modInfo.entries.len
-
-      text.add("**Modules:** " & $totalModules & "\n")
-      text.add("**Symbols:** " & $totalSymbols & "\n")
-
-      if pkg.modules.len > 0:
-        text.add("\n### Available Modules\n\n")
-        var count = 0
-        for modName in pkg.modules.keys:
-          text.add("• " & modName & "\n")
-          inc count
-          if count >= 10:
-            text.add("• ... (" & $(pkg.modules.len - 10) & " more)\n")
-            break
 
     result = McpToolResult(content: @[createTextContent(text)])
 
@@ -338,15 +298,6 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
 
   result.registerTool(
     McpTool(
-      name: "index_package",
-      description: some("Manually index a package for searching. Use ONLY when: 1) User explicitly asks to index a package, OR 2) A search for a third-party package returned no results and user wants to index it first. Note: stdlib is already pre-indexed."),
-      inputSchema: parseJson("""{"type": "object", "properties": {"packageName": {"type": "string"}, "projectRoot": {"type": "string", "description": "Optional: Path to project root directory containing .nimble file. Uses current directory if not provided."}}, "required": ["packageName"]}""")
-    ),
-    handleIndexPackage
-  )
-
-  result.registerTool(
-    McpTool(
       name: "list_indexed_packages",
       description: some("List all indexed packages"),
       inputSchema: parseJson("""{"type": "object", "properties": {}}""")
@@ -361,7 +312,7 @@ proc createServer(cfg: Config, stdlibIndex: StdlibIndex,
     let updateNimble = if args.hasKey("updateNimble"): args["updateNimble"].getBool() else: false
     let projectRoot = if args.hasKey("projectRoot"): args["projectRoot"].getStr() else: ""
 
-    let (pm, err) = setupProjectManager(projectRoot)
+    let (pm, err) = setupProjectManager(projectRoot, autoIndex = false)
     if err.isSome:
       return err.get()
 
