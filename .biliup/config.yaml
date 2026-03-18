@@ -1,0 +1,26 @@
+# BiliUp 配置文件
+
+video:
+  style: default
+  enableTTS: false
+  enableBGM: false
+  bgmVolume: 0.3
+  enableKenBurns: true
+
+  subtitle:
+    fontSize: 24
+    fontColor: white
+    backgroundColor: black@0.5
+    position: bottom
+    animation: fade
+
+platform:
+  default: bilibili
+
+template:
+  defaultStyle: default
+
+ai:
+  enabled: true
+  provider: deepseek
+  model: deepseek-chat

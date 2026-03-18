@@ -352,6 +352,6 @@ proc generateCompatReportMarkdown*(report: CompatReport): string =
 
 when isMainModule:
   # Test
-  echo "Installed versions:"
-  for ver in getInstalledVersions():
-    echo "  - ", ver.version, " at ", ver.binPath
+  import utils/logging
+  logging.initLogging()
+  info "Installed versions", versions = getInstalledVersions()

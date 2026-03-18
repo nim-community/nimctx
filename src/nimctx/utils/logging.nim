@@ -1,28 +1,50 @@
-# Logging utilities
+# Logging utilities using chronicles
+#
+# Usage:
+#   import nimctx/utils/logging
+#   logging.initLogging()
+#   info "Message", key = value
+#
+# To enable file logging at compile time:
+#   -d:chronicles_sinks="file(/path/to/nimctx.log)"
 
-import std/[times, strutils]
+import chronicles
+export chronicles  # Re-export all chronicles symbols
 
-type
-  LogLevel* = enum
-    llDebug, llInfo, llWarn, llError
+import std/[os, syncio]
 
-var currentLevel* = llInfo
+when defined(posix):
+  import std/posix
 
-proc log*(level: LogLevel, msg: string) =
-  ## Log a message
-  if level < currentLevel:
-    return
+const defaultLogPath* = when defined(macosx) or defined(linux):
+    getHomeDir() / ".local" / "share" / "nimctx" / "nimctx.log"
+  else:
+    getHomeDir() / "nimctx" / "nimctx.log"
+
+var logFile*: File = nil
+  ## Global log file handle (nil means using default chronicles output)
+
+proc initLogging*() =
+  ## Initialize logging to the default log file at runtime (POSIX only)
+  ## Log file location:
+  ##   - Linux/macOS: ~/.local/share/nimctx/nimctx.log
+  ##   - Windows: ~/nimctx/nimctx.log
+  ## 
+  ## For cross-platform file logging, use compile-time flag instead:
+  ##   -d:chronicles_sinks="file(path)"
   
-  let timestamp = now().format("yyyy-MM-dd HH:mm:ss")
-  let levelStr = case level
-    of llDebug: "DEBUG"
-    of llInfo: "INFO"
-    of llWarn: "WARN"
-    of llError: "ERROR"
+  let logDir = parentDir(defaultLogPath)
+  if not dirExists(logDir):
+    createDir(logDir)
   
-  stderr.writeLine("[" & timestamp & "] [" & levelStr & "] " & msg)
-
-proc debug*(msg: string) = log(llDebug, msg)
-proc info*(msg: string) = log(llInfo, msg)
-proc warn*(msg: string) = log(llWarn, msg)
-proc error*(msg: string) = log(llError, msg)
+  if logFile != nil and logFile != stdout and logFile != stderr:
+    logFile.close()
+  
+  logFile = open(defaultLogPath, fmAppend)
+  
+  when defined(posix):
+    # Redirect stdout and stderr to log file
+    let logFd = getFileHandle(logFile)
+    let err = dup2(logFd, getFileHandle(stderr))
+    if err != -1:
+      discard dup2(logFd, getFileHandle(stdout))
