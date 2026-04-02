@@ -190,23 +190,16 @@ proc getDependencies*(pm: ProjectManager, directOnly: bool = false): seq[Depende
   ## Get project dependencies
   ## When directOnly is true, returns only direct dependencies (those listed in .nimble file)
   ## When directOnly is false, returns all dependencies including transitive ones
-  let deps = parseNimbleDeps(pm)
   
   if directOnly:
-    # Return only direct dependencies (those that are not dependencies of other deps)
-    var transitiveDepNames: seq[string]
-    for dep in deps:
-      for transDep in dep.dependencies:
-        if transDep notin transitiveDepNames:
-          transitiveDepNames.add(transDep)
-    
-    var directDeps: seq[Dependency]
-    for dep in deps:
-      if dep.name notin transitiveDepNames:
-        directDeps.add(dep)
-    return directDeps
-  
-  return deps
+    # Use nimble dump for direct dependencies (much faster: ~0.7s vs ~3.5s)
+    let info = pm.parseNimbleDump()
+    if info.isSome:
+      return info.get().requires
+    return @[]
+  else:
+    # Use nimble deps for full dependency tree (includes transitive deps)
+    return parseNimbleDeps(pm)
 
 proc getDependencyPath*(pm: ProjectManager, pkgName: string): string =
   ## Get path to installed dependency
