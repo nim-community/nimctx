@@ -118,11 +118,14 @@ proc parseNimbleDump*(pm: ProjectManager): Option[ProjectInfo] =
     if json.hasKey("requires"):
       for req in json["requires"]:
         if req.hasKey("name") and req.hasKey("str"):
+          var resolvedVer = ""
+          if req.hasKey("ver") and req["ver"].hasKey("ver"):
+            resolvedVer = req["ver"]["ver"].getStr()
           let dep = Dependency(
             name: req["name"].getStr(),
             version: req["str"].getStr(),
             description: "",
-            resolvedTo: if req.hasKey("ver"): req["ver"]["ver"].getStr() else: ""
+            resolvedTo: resolvedVer
           )
           info.requires.add(dep)
     
@@ -139,7 +142,17 @@ proc parseNimbleDeps*(pm: ProjectManager): seq[Dependency] =
     return @[]
   
   try:
-    let json = parseJson(output)
+    # nimble may print warnings to stdout (especially with poStdErrToStdOut),
+    # so find the actual JSON array start
+    var jsonStr = output
+    let arrayStart = output.find('[')
+    let objStart = output.find('{')
+    if arrayStart >= 0 and (objStart < 0 or arrayStart < objStart):
+      jsonStr = output[arrayStart .. ^1]
+    elif objStart >= 0:
+      jsonStr = output[objStart .. ^1]
+    
+    let json = parseJson(jsonStr)
     
     proc parseDepNode(node: JsonNode): Dependency =
       result = Dependency()
@@ -206,6 +219,18 @@ proc getDependencyPath*(pm: ProjectManager, pkgName: string): string =
   let (output, exitCode) = pm.execNimble("path " & pkgName)
   if exitCode == 0:
     return output.strip()
+  
+  # Fallback: scan project-local nimbledeps/pkgs2 directory
+  if pm.projectRoot.len > 0:
+    let depsDir = pm.projectRoot / "nimbledeps" / "pkgs2"
+    if dirExists(depsDir):
+      for dir in walkDir(depsDir):
+        if dir.kind == pcDir:
+          let dirName = extractFilename(dir.path)
+          # Match <pkgName>-* (handles both name-version and name-version-hash)
+          if dirName.startsWith(pkgName & "-"):
+            return dir.path
+  
   return ""
 
 proc isDependencyInstalled*(pm: ProjectManager, pkgName: string): bool =

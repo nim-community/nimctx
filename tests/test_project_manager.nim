@@ -45,3 +45,35 @@ suite "project manager":
     let pm2 = pm1.withProjectRoot("")
     
     check pm2.projectRoot == "/original"
+
+  test "getDependencyPath falls back to nimbledeps/pkgs2":
+    let tmpDir = getTempDir() / "nimctx_test_deps_pkgs2"
+    let pkgDir = tmpDir / "nimbledeps" / "pkgs2" / "mypkg-1.0.0-abc123"
+    createDir(pkgDir)
+    
+    let pm = newProjectManager("nimble", tmpDir)
+    let path = pm.getDependencyPath("mypkg")
+    check path == pkgDir
+    
+    removeDir(tmpDir)
+
+  test "getDependencyPath returns empty when not found":
+    let tmpDir = getTempDir() / "nimctx_test_deps_missing"
+    createDir(tmpDir)
+    
+    let pm = newProjectManager("nimble", tmpDir)
+    let path = pm.getDependencyPath("nonexistent")
+    check path == ""
+    
+    removeDir(tmpDir)
+
+  test "isDependencyInstalled uses nimbledeps fallback":
+    let tmpDir = getTempDir() / "nimctx_test_installed"
+    let pkgDir = tmpDir / "nimbledeps" / "pkgs2" / "testpkg-1.0.0"
+    createDir(pkgDir)
+    
+    let pm = newProjectManager("nimble", tmpDir)
+    check pm.isDependencyInstalled("testpkg") == true
+    check pm.isDependencyInstalled("missing") == false
+    
+    removeDir(tmpDir)
