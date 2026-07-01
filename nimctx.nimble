@@ -13,7 +13,7 @@ bin           = @["nimctx"]
 
 requires "nim >= 1.6.0"
 requires "nimcp"
-requires "mummy >= 0.4.0"
+requires "mummy == 0.4.6"
 requires "taskpools >= 0.0.1"
 requires "tiny_sqlite >= 0.2.0"
 requires "chronicles >= 0.10.0"
